@@ -7071,4 +7071,5 @@ async function editMessage(
     env,
     "editMessageText",
     payload
-  )
+  );
+}
