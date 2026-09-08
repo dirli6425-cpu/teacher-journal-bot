@@ -8088,4 +8088,724 @@ showMainMenu =
         ]
       }
     );
+    // =====================================================
+// 👨‍👩‍👦 ДЛЯ РОДИТЕЛЕЙ
+// =====================================================
+
+function parentShortName(name) {
+  const parts = String(name || "")
+    .trim()
+    .split(/\s+/);
+
+  const surname = parts[0] || "";
+  const initial = parts[1]
+    ? parts[1][0] + "."
+    : "";
+
+  return `${surname} ${initial}`.trim();
+}
+
+
+function monthTitle(month) {
+  const months = [
+    "ЯНВАРЬ",
+    "ФЕВРАЛЬ",
+    "МАРТ",
+    "АПРЕЛЬ",
+    "МАЙ",
+    "ИЮНЬ",
+    "ИЮЛЬ",
+    "АВГУСТ",
+    "СЕНТЯБРЬ",
+    "ОКТЯБРЬ",
+    "НОЯБРЬ",
+    "ДЕКАБРЬ"
+  ];
+
+  const [year, m] =
+    month.split("-");
+
+  return `${months[
+    Number(m) - 1
+  ]} ${year}`;
+}
+
+
+function shiftMonth(
+  month,
+  diff
+) {
+  const [year, m] =
+    month
+      .split("-")
+      .map(Number);
+
+  const d =
+    new Date(
+      Date.UTC(
+        year,
+        m - 1 + diff,
+        1
+      )
+    );
+
+  return (
+    d.getUTCFullYear() +
+    "-" +
+    String(
+      d.getUTCMonth() + 1
+    ).padStart(2, "0")
+  );
+}
+
+
+// =====================================================
+// ОБЩАЯ СВОДКА НА ВСЮ ГРУППУ
+// =====================================================
+
+async function showParentsReport(
+  env,
+  chatId,
+  messageId,
+  month
+) {
+  await initLessonAttendance(env);
+
+  const students =
+    await getActiveStudents(env);
+
+  const rows =
+    await env.DB.prepare(`
+      SELECT
+        student_id,
+
+        SUM(
+          CASE
+            WHEN status = 'absent'
+            THEN 1
+            ELSE 0
+          END
+        ) AS absent_count,
+
+        SUM(
+          CASE
+            WHEN status = 'left'
+            THEN 1
+            ELSE 0
+          END
+        ) AS left_count,
+
+        SUM(
+          CASE
+            WHEN status = 'late'
+            THEN 1
+            ELSE 0
+          END
+        ) AS late_count,
+
+        SUM(
+          CASE
+            WHEN status = 'excused'
+            THEN 1
+            ELSE 0
+          END
+        ) AS excused_count
+
+      FROM lesson_attendance
+
+      WHERE substr(date, 1, 7) = ?
+
+      GROUP BY student_id
+    `)
+      .bind(month)
+      .all();
+
+  const stats = new Map();
+
+  for (
+    const row
+    of rows.results || []
+  ) {
+    stats.set(
+      Number(row.student_id),
+      row
+    );
+  }
+
+
+  let text =
+`👨‍👩‍👦 <b>ДЛЯ РОДИТЕЛЕЙ</b>
+📊 <b>${monthTitle(month)} • ГРУППА 102</b>
+━━━━━━━━━━━━━━
+
+`;
+
+  for (
+    const student
+    of students
+  ) {
+    const row =
+      stats.get(
+        Number(student.id)
+      ) || {};
+
+    const absent =
+      Number(
+        row.absent_count || 0
+      );
+
+    const left =
+      Number(
+        row.left_count || 0
+      );
+
+    const late =
+      Number(
+        row.late_count || 0
+      );
+
+    const excused =
+      Number(
+        row.excused_count || 0
+      );
+
+    text +=
+`${escapeHtml(
+  parentShortName(student.name)
+)}  ❌${absent} 🚪${left} ⏰${late} 🏥${excused}
+`;
+  }
+
+
+  text +=
+`
+━━━━━━━━━━━━━━
+❌ пропущено пар
+🚪 ушёл раньше
+⏰ опоздания
+🏥 уважительно`;
+
+  await editOrSend(
+    env,
+    chatId,
+    messageId,
+    text,
+    {
+      inline_keyboard: [
+        [
+          {
+            text: "◀️",
+            callback_data:
+              `parents_month:${shiftMonth(
+                month,
+                -1
+              )}`
+          },
+          {
+            text:
+              `📅 ${monthTitle(month)}`,
+            callback_data:
+              "parents_noop"
+          },
+          {
+            text: "▶️",
+            callback_data:
+              `parents_month:${shiftMonth(
+                month,
+                1
+              )}`
+          }
+        ],
+        [
+          {
+            text:
+              "🔎 Подробно по ученику",
+            callback_data:
+              `parents_students:${month}`
+          }
+        ],
+        [
+          {
+            text:
+              "🏠 Главное меню",
+            callback_data:
+              "main"
+          }
+        ]
+      ]
+    }
+  );
+}
+
+
+// =====================================================
+// ВЫБОР УЧЕНИКА
+// =====================================================
+
+async function showParentsStudents(
+  env,
+  chatId,
+  messageId,
+  month
+) {
+  const students =
+    await getActiveStudents(env);
+
+  const keyboard = [];
+
+  for (
+    const student
+    of students
+  ) {
+    keyboard.push([
+      {
+        text:
+          parentShortName(
+            student.name
+          ),
+        callback_data:
+          `parents_student:${month}:${student.id}`
+      }
+    ]);
+  }
+
+  keyboard.push([
+    {
+      text:
+        "⬅️ К общей сводке",
+      callback_data:
+        `parents_month:${month}`
+    }
+  ]);
+
+  await editOrSend(
+    env,
+    chatId,
+    messageId,
+
+`👨‍👩‍👦 <b>ПОДРОБНОСТИ</b>
+
+📅 ${monthTitle(month)}
+
+Выберите ученика 👇`,
+
+    {
+      inline_keyboard:
+        keyboard
+    }
+  );
+}
+
+
+// =====================================================
+// ПОДРОБНАЯ КАРТОЧКА УЧЕНИКА
+// =====================================================
+
+async function showParentStudent(
+  env,
+  chatId,
+  messageId,
+  month,
+  studentId
+) {
+  await initLessonAttendance(env);
+
+  const student =
+    await env.DB.prepare(`
+      SELECT
+        id,
+        name
+
+      FROM students
+
+      WHERE id = ?
+    `)
+      .bind(studentId)
+      .first();
+
+  if (!student) {
+    return;
+  }
+
+
+  const result =
+    await env.DB.prepare(`
+      SELECT
+        date,
+        lesson_no,
+        status
+
+      FROM lesson_attendance
+
+      WHERE
+        student_id = ?
+        AND substr(date, 1, 7) = ?
+        AND status IN (
+          'absent',
+          'left',
+          'late',
+          'excused'
+        )
+
+      ORDER BY
+        date ASC,
+        lesson_no ASC
+    `)
+      .bind(
+        studentId,
+        month
+      )
+      .all();
+
+
+  const rows =
+    result.results || [];
+
+  let absent = 0;
+  let left = 0;
+  let late = 0;
+  let excused = 0;
+
+
+  for (const row of rows) {
+    if (
+      row.status === "absent"
+    ) {
+      absent++;
+    }
+
+    if (
+      row.status === "left"
+    ) {
+      left++;
+    }
+
+    if (
+      row.status === "late"
+    ) {
+      late++;
+    }
+
+    if (
+      row.status === "excused"
+    ) {
+      excused++;
+    }
+  }
+
+
+  let text =
+`👨‍👩‍👦 <b>ДЛЯ РОДИТЕЛЕЙ</b>
+
+👤 <b>${escapeHtml(
+  student.name
+)}</b>
+
+📅 ${monthTitle(month)}
+
+━━━━━━━━━━━━━━
+❌ Пропущено пар: <b>${absent}</b>
+🚪 Ушёл раньше: <b>${left}</b>
+⏰ Опозданий: <b>${late}</b>
+🏥 Уважительно: <b>${excused}</b>
+━━━━━━━━━━━━━━`;
+
+
+  if (!rows.length) {
+    text +=
+`\n\n✅ Нарушений за месяц нет.`;
+  } else {
+    text +=
+`\n\n📅 <b>Подробности:</b>`;
+
+    for (
+      const row
+      of rows
+    ) {
+      const dateText =
+        row.date
+          .split("-")
+          .reverse()
+          .slice(0, 2)
+          .join(".");
+
+      if (
+        row.status === "absent"
+      ) {
+        text +=
+`\n${dateText} — ❌ не был на ${row.lesson_no}-й паре`;
+      }
+
+      if (
+        row.status === "left"
+      ) {
+        text +=
+`\n${dateText} — 🚪 ушёл с ${row.lesson_no}-й пары`;
+      }
+
+      if (
+        row.status === "late"
+      ) {
+        text +=
+`\n${dateText} — ⏰ опоздал на ${row.lesson_no}-ю пару`;
+      }
+
+      if (
+        row.status === "excused"
+      ) {
+        text +=
+`\n${dateText} — 🏥 уважительно, ${row.lesson_no}-я пара`;
+      }
+    }
+  }
+
+
+  await editOrSend(
+    env,
+    chatId,
+    messageId,
+    text,
+    {
+      inline_keyboard: [
+        [
+          {
+            text:
+              "⬅️ К ученикам",
+            callback_data:
+              `parents_students:${month}`
+          }
+        ],
+        [
+          {
+            text:
+              "📊 Общая сводка",
+            callback_data:
+              `parents_month:${month}`
+          }
+        ]
+      ]
+    }
+  );
+}
+
+
+// =====================================================
+// CALLBACK ДЛЯ РОДИТЕЛЕЙ
+// =====================================================
+
+const oldExtraCallbackParents =
+  handleExtraCallback;
+
+handleExtraCallback =
+  async function(
+    data,
+    env,
+    chatId,
+    messageId,
+    userId
+  ) {
+
+    if (
+      data === "parents"
+    ) {
+      const month =
+        localDate()
+          .slice(0, 7);
+
+      await showParentsReport(
+        env,
+        chatId,
+        messageId,
+        month
+      );
+
+      return true;
+    }
+
+
+    if (
+      data.startsWith(
+        "parents_month:"
+      )
+    ) {
+      const month =
+        data.split(":")[1];
+
+      await showParentsReport(
+        env,
+        chatId,
+        messageId,
+        month
+      );
+
+      return true;
+    }
+
+
+    if (
+      data.startsWith(
+        "parents_students:"
+      )
+    ) {
+      const month =
+        data.split(":")[1];
+
+      await showParentsStudents(
+        env,
+        chatId,
+        messageId,
+        month
+      );
+
+      return true;
+    }
+
+
+    if (
+      data.startsWith(
+        "parents_student:"
+      )
+    ) {
+      const parts =
+        data.split(":");
+
+      const month =
+        parts[1];
+
+      const studentId =
+        Number(parts[2]);
+
+      await showParentStudent(
+        env,
+        chatId,
+        messageId,
+        month,
+        studentId
+      );
+
+      return true;
+    }
+
+
+    if (
+      data === "parents_noop"
+    ) {
+      return true;
+    }
+
+
+    return oldExtraCallbackParents(
+      data,
+      env,
+      chatId,
+      messageId,
+      userId
+    );
+  };
+
+
+// =====================================================
+// ОБНОВЛЁННОЕ ГЛАВНОЕ МЕНЮ
+// =====================================================
+
+showMainMenu =
+  async function(
+    env,
+    chatId,
+    messageId = null
+  ) {
+
+    await editOrSend(
+      env,
+      chatId,
+      messageId,
+
+`📚 <b>ЖУРНАЛ ГРУППЫ №102</b>
+
+Выберите раздел 👇`,
+
+      {
+        inline_keyboard: [
+
+          [
+            {
+              text:
+                "👨‍👩‍👦 ДЛЯ РОДИТЕЛЕЙ",
+              callback_data:
+                "parents"
+            }
+          ],
+
+          [
+            {
+              text:
+                "📚 По парам",
+              callback_data:
+                "pairs"
+            }
+          ],
+
+          [
+            {
+              text:
+                "👥 Посещаемость",
+              callback_data:
+                "attendance"
+            },
+            {
+              text:
+                "👀 Кого нет",
+              callback_data:
+                "missing"
+            }
+          ],
+
+          [
+            {
+              text:
+                "📆 История",
+              callback_data:
+                "history"
+            },
+            {
+              text:
+                "🧹 Дежурство",
+              callback_data:
+                "duty"
+            }
+          ],
+
+          [
+            {
+              text:
+                "📊 Статистика",
+              callback_data:
+                "stats"
+            },
+            {
+              text:
+                "👨‍🎓 Студенты",
+              callback_data:
+                "students"
+            }
+          ],
+
+          [
+            {
+              text:
+                "📤 Excel",
+              callback_data:
+                "excel"
+            },
+            {
+              text:
+                "⚙️ Настройки",
+              callback_data:
+                "settings"
+            }
+          ]
+        ]
+      }
+    );
+  };
   };
