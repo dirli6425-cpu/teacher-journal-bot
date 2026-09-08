@@ -4307,7 +4307,7 @@ function parentsTotals(stats) {
     );
 }
 
-showParentsReport = async function(env, chatId, messageId, month) {
+async function showParentsReport(env, chatId, messageId, month) {
     const stats = await getParentsMonthStats(env, month);
     const table = parentTable(stats);
     const totals = parentsTotals(stats);
@@ -4396,7 +4396,7 @@ async function showParentsScreenshot(env, chatId, messageId, month) {
     });
 }
 
-showParentStudent = async function(env, chatId, messageId, month, studentId) {
+async function showParentStudent(env, chatId, messageId, month, studentId) {
     await initLessonAttendance(env);
 
     const student = await env.DB.prepare(`
