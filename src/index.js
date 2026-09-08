@@ -4307,7 +4307,7 @@ function parentsTotals(stats) {
     );
 }
 
-async function showParentsReport(env, chatId, messageId, month) {
+async function showParentsReportV3(env, chatId, messageId, month) {
     const stats = await getParentsMonthStats(env, month);
     const table = parentTable(stats);
     const totals = parentsTotals(stats);
@@ -4396,7 +4396,7 @@ async function showParentsScreenshot(env, chatId, messageId, month) {
     });
 }
 
-async function showParentStudent(env, chatId, messageId, month, studentId) {
+async function showParentStudentV3(env, chatId, messageId, month, studentId) {
     await initLessonAttendance(env);
 
     const student = await env.DB.prepare(`
@@ -4550,3 +4550,10 @@ handleExtraCallback = async function(
         userId
     );
 };
+
+// =====================================================
+// АКТИВИРУЕМ РОДИТЕЛЬСКИЙ ОТЧЁТ v3 ПОСЛЕДНИМ
+// =====================================================
+showParentsReport = showParentsReportV3;
+showParentStudent = showParentStudentV3;
+
