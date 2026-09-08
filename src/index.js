@@ -8808,4 +8808,201 @@ showMainMenu =
       }
     );
   };
+    // =====================================================
+// 👨‍👩‍👦 КРАСИВАЯ ТАБЛИЦА ДЛЯ РОДИТЕЛЕЙ
+// =====================================================
+
+showParentsReport =
+  async function(
+    env,
+    chatId,
+    messageId,
+    month
+  ) {
+    await initLessonAttendance(env);
+
+    const students =
+      await getActiveStudents(env);
+
+    const result =
+      await env.DB.prepare(`
+        SELECT
+          student_id,
+
+          SUM(
+            CASE WHEN status = 'absent'
+            THEN 1 ELSE 0 END
+          ) AS absent_count,
+
+          SUM(
+            CASE WHEN status = 'left'
+            THEN 1 ELSE 0 END
+          ) AS left_count,
+
+          SUM(
+            CASE WHEN status = 'late'
+            THEN 1 ELSE 0 END
+          ) AS late_count,
+
+          SUM(
+            CASE WHEN status = 'excused'
+            THEN 1 ELSE 0 END
+          ) AS excused_count
+
+        FROM lesson_attendance
+
+        WHERE substr(date, 1, 7) = ?
+
+        GROUP BY student_id
+      `)
+        .bind(month)
+        .all();
+
+    const stats = new Map();
+
+    for (
+      const row
+      of result.results || []
+    ) {
+      stats.set(
+        Number(row.student_id),
+        row
+      );
+    }
+
+
+    // -----------------------------
+    // Формируем строки таблицы
+    // -----------------------------
+
+    const lines = [];
+
+    for (
+      const student
+      of students
+    ) {
+      const row =
+        stats.get(
+          Number(student.id)
+        ) || {};
+
+      const absent =
+        Number(
+          row.absent_count || 0
+        );
+
+      const left =
+        Number(
+          row.left_count || 0
+        );
+
+      const late =
+        Number(
+          row.late_count || 0
+        );
+
+      const excused =
+        Number(
+          row.excused_count || 0
+        );
+
+
+      let name =
+        parentShortName(
+          student.name
+        );
+
+      // Чтобы длинные фамилии
+      // не ломали таблицу
+      if (name.length > 16) {
+        name =
+          name.slice(0, 15) + "…";
+      }
+
+      name =
+        name.padEnd(17, " ");
+
+
+      lines.push(
+        `${name} ${String(absent).padStart(2)}  ` +
+        `${String(left).padStart(2)}  ` +
+        `${String(late).padStart(2)}  ` +
+        `${String(excused).padStart(2)}`
+      );
+    }
+
+
+    const table =
+`Фамилия            ❌  🚪  ⏰  🏥
+────────────────────────────
+${lines.join("\n")}
+────────────────────────────`;
+
+
+    const text =
+`👨‍👩‍👦 <b>ДЛЯ РОДИТЕЛЕЙ</b>
+📊 <b>${monthTitle(month)} • ГРУППА 102</b>
+
+<pre>${escapeHtml(table)}</pre>
+❌ Пропуски пар
+🚪 Ушёл раньше
+⏰ Опоздания
+🏥 Уважительно`;
+
+
+    await editOrSend(
+      env,
+      chatId,
+      messageId,
+      text,
+      {
+        inline_keyboard: [
+          [
+            {
+              text: "◀️",
+              callback_data:
+                `parents_month:${shiftMonth(
+                  month,
+                  -1
+                )}`
+            },
+
+            {
+              text:
+                `📅 ${monthTitle(month)}`,
+              callback_data:
+                "parents_noop"
+            },
+
+            {
+              text: "▶️",
+              callback_data:
+                `parents_month:${shiftMonth(
+                  month,
+                  1
+                )}`
+            }
+          ],
+
+          [
+            {
+              text:
+                "🔎 Подробно по ученику",
+              callback_data:
+                `parents_students:${month}`
+            }
+          ],
+
+          [
+            {
+              text:
+                "🏠 Главное меню",
+              callback_data:
+                "main"
+            }
+          ]
+        ]
+      }
+    );
+  };
   };
