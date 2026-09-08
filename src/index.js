@@ -4200,6 +4200,7 @@ ${lines.join("\n")}
                 });
             };
     };
+
 // =====================================================
 // РОДИТЕЛИ v2: ПОЛНЫЕ ДНИ + СКРИН
 // =====================================================
@@ -4307,7 +4308,7 @@ function parentsTotals(stats) {
     );
 }
 
-async function showParentsReportV3(env, chatId, messageId, month) {
+async function showParentsReportV4(env, chatId, messageId, month) {
     const stats = await getParentsMonthStats(env, month);
     const table = parentTable(stats);
     const totals = parentsTotals(stats);
@@ -4396,7 +4397,7 @@ async function showParentsScreenshot(env, chatId, messageId, month) {
     });
 }
 
-async function showParentStudentV3(env, chatId, messageId, month, studentId) {
+async function showParentStudentV4(env, chatId, messageId, month, studentId) {
     await initLessonAttendance(env);
 
     const student = await env.DB.prepare(`
@@ -4542,6 +4543,25 @@ handleExtraCallback = async function(
         return true;
     }
 
+    if (data === "parents") {
+        await showParentsReportV4(env, chatId, messageId, currentMonth());
+        return true;
+    }
+
+    if (data.startsWith("parents_month:")) {
+        const month = data.split(":")[1];
+        await showParentsReportV4(env, chatId, messageId, month);
+        return true;
+    }
+
+    if (data.startsWith("parents_student:")) {
+        const parts = data.split(":");
+        const month = parts[1];
+        const studentId = Number(parts[2]);
+        await showParentStudentV4(env, chatId, messageId, month, studentId);
+        return true;
+    }
+
     return oldExtraCallbackParentsV2(
         data,
         env,
@@ -4550,10 +4570,3 @@ handleExtraCallback = async function(
         userId
     );
 };
-
-// =====================================================
-// АКТИВИРУЕМ РОДИТЕЛЬСКИЙ ОТЧЁТ v3 ПОСЛЕДНИМ
-// =====================================================
-showParentsReport = showParentsReportV3;
-showParentStudent = showParentStudentV3;
-
