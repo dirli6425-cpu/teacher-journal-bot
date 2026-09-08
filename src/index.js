@@ -1116,7 +1116,43 @@ async function handleCallback(
 
     return;
   }
-}
+  // ДОПОЛНИТЕЛЬНЫЕ CALLBACK-МАРШРУТЫ
+
+  if (
+    await handleExtraCallback(
+      data,
+      env,
+      chatId,
+      messageId,
+      userId
+    )
+  ) {
+    return;
+  }
+
+  if (
+    await handlePart5Callback(
+      data,
+      env,
+      chatId,
+      messageId,
+      userId
+    )
+  ) {
+    return;
+  }
+
+  if (
+    await handlePart6Callback(
+      data,
+      env,
+      chatId,
+      messageId,
+      userId
+    )
+  ) {
+    return;
+  }}
 
 
 // =====================================================
