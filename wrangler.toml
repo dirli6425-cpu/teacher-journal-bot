@@ -6,3 +6,6 @@ compatibility_date = "2026-09-08"
 binding = "DB"
 database_name = "teacher-journal-db"
 database_id = "dd63aed8-9c6a-4da1-b83c-389bf86f1a17"
+
+[observability]
+enabled = true
