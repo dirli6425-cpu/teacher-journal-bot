@@ -4233,12 +4233,6 @@ async function getParentsMonthStats(env, month) {
         WHERE
             substr(a.date, 1, 7) = ?
             AND a.status = 'absent'
-            AND NOT EXISTS (
-                SELECT 1
-                FROM lesson_attendance l
-                WHERE l.student_id = a.student_id
-                  AND l.date = a.date
-            )
         GROUP BY a.student_id
     `).bind(month).all();
 
@@ -4317,7 +4311,7 @@ async function showParentsReportV4(env, chatId, messageId, month) {
 📊 <b>${monthTitle(month)} • ГРУППА 102</b>
 
 <pre>${escapeHtml(table)}</pre>
-📅 Полностью пропущен день
+📅 Пропущен весь день (общая посещаемость)
 ❌ Пропущены отдельные пары
 🚪 Ушёл раньше
 ⏰ Опоздал
@@ -4375,7 +4369,7 @@ async function showParentsScreenshot(env, chatId, messageId, month) {
 
 <pre>${escapeHtml(table)}</pre>
 <b>Обозначения:</b>
-📅 — пропущен весь учебный день
+📅 — пропущен весь день (общая посещаемость)
 ❌ — пропущены отдельные пары
 🚪 — ушёл раньше
 ⏰ — опоздал
@@ -4425,12 +4419,6 @@ async function showParentStudentV4(env, chatId, messageId, month, studentId) {
             a.student_id = ?
             AND substr(a.date, 1, 7) = ?
             AND a.status = 'absent'
-            AND NOT EXISTS (
-                SELECT 1
-                FROM lesson_attendance l
-                WHERE l.student_id = a.student_id
-                  AND l.date = a.date
-            )
         ORDER BY a.date ASC
     `).bind(studentId, month).all();
 
