@@ -7073,3 +7073,61 @@ async function editMessage(
     payload
   );
 }
+async function editOrSend(
+  env,
+  chatId,
+  messageId,
+  text,
+  replyMarkup = null
+) {
+  if (messageId) {
+    const result = await editMessage(
+      env,
+      chatId,
+      messageId,
+      text,
+      replyMarkup
+    );
+
+    if (result?.ok) {
+      return result;
+    }
+  }
+
+  return sendMessage(
+    env,
+    chatId,
+    text,
+    replyMarkup
+  );
+}
+
+
+async function answerCallback(
+  env,
+  callbackQueryId,
+  text = ""
+) {
+  return telegram(
+    env,
+    "answerCallbackQuery",
+    {
+      callback_query_id:
+        callbackQueryId,
+      text
+    }
+  );
+}
+
+
+async function answerSimple(
+  env,
+  chatId,
+  text
+) {
+  return sendMessage(
+    env,
+    chatId,
+    text
+  );
+}
