@@ -1,4 +1,4 @@
-const TZ = "Europe/Chisinau";
+const TZ = "Europe/Chisinau"; 
 
 const DEFAULT_STUDENTS = [
   "Абросимов Сергей",
