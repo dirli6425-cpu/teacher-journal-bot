@@ -4200,3 +4200,353 @@ ${lines.join("\n")}
                 });
             };
     };
+// =====================================================
+// РОДИТЕЛИ v2: ПОЛНЫЕ ДНИ + СКРИН
+// =====================================================
+
+async function getParentsMonthStats(env, month) {
+    await initLessonAttendance(env);
+
+    const students = await getActiveStudents(env);
+
+    const pairRows = await env.DB.prepare(`
+        SELECT
+            student_id,
+            SUM(CASE WHEN status = 'absent' THEN 1 ELSE 0 END) AS absent_count,
+            SUM(CASE WHEN status = 'left' THEN 1 ELSE 0 END) AS left_count,
+            SUM(CASE WHEN status = 'late' THEN 1 ELSE 0 END) AS late_count,
+            SUM(CASE WHEN status = 'excused' THEN 1 ELSE 0 END) AS excused_count
+        FROM lesson_attendance
+        WHERE substr(date, 1, 7) = ?
+        GROUP BY student_id
+    `).bind(month).all();
+
+    // Полный день считаем только из обычной посещаемости.
+    // Если на эту дату уже есть попарные отметки ученика,
+    // второй раз тот же день не считаем.
+    const dayRows = await env.DB.prepare(`
+        SELECT
+            a.student_id,
+            COUNT(*) AS full_day_count
+        FROM attendance a
+        WHERE
+            substr(a.date, 1, 7) = ?
+            AND a.status = 'absent'
+            AND NOT EXISTS (
+                SELECT 1
+                FROM lesson_attendance l
+                WHERE l.student_id = a.student_id
+                  AND l.date = a.date
+            )
+        GROUP BY a.student_id
+    `).bind(month).all();
+
+    const pairMap = new Map();
+    const dayMap = new Map();
+
+    for (const row of pairRows.results || []) {
+        pairMap.set(Number(row.student_id), row);
+    }
+
+    for (const row of dayRows.results || []) {
+        dayMap.set(Number(row.student_id), Number(row.full_day_count || 0));
+    }
+
+    return students.map(student => {
+        const row = pairMap.get(Number(student.id)) || {};
+
+        return {
+            id: Number(student.id),
+            name: student.name,
+            fullDays: dayMap.get(Number(student.id)) || 0,
+            absent: Number(row.absent_count || 0),
+            left: Number(row.left_count || 0),
+            late: Number(row.late_count || 0),
+            excused: Number(row.excused_count || 0)
+        };
+    });
+}
+
+function parentTable(stats) {
+    const lines = stats.map(student => {
+        let name = parentShortName(student.name);
+
+        if (name.length > 15) {
+            name = name.slice(0, 14) + "…";
+        }
+
+        name = name.padEnd(16, " ");
+
+        return (
+            `${name}` +
+            `${String(student.fullDays).padStart(2)} ` +
+            `${String(student.absent).padStart(2)} ` +
+            `${String(student.left).padStart(2)} ` +
+            `${String(student.late).padStart(2)} ` +
+            `${String(student.excused).padStart(2)}`
+        );
+    });
+
+    return `Фамилия          📅 ❌ 🚪 ⏰ 🏥
+──────────────────────────
+${lines.join("\n")}
+──────────────────────────`;
+}
+
+function parentsTotals(stats) {
+    return stats.reduce(
+        (sum, s) => {
+            sum.fullDays += s.fullDays;
+            sum.absent += s.absent;
+            sum.left += s.left;
+            sum.late += s.late;
+            sum.excused += s.excused;
+            return sum;
+        },
+        { fullDays: 0, absent: 0, left: 0, late: 0, excused: 0 }
+    );
+}
+
+showParentsReport = async function(env, chatId, messageId, month) {
+    const stats = await getParentsMonthStats(env, month);
+    const table = parentTable(stats);
+    const totals = parentsTotals(stats);
+
+    const text = `👨‍👩‍👦 <b>ДЛЯ РОДИТЕЛЕЙ</b>
+📊 <b>${monthTitle(month)} • ГРУППА 102</b>
+
+<pre>${escapeHtml(table)}</pre>
+📅 Полностью пропущен день
+❌ Пропущены отдельные пары
+🚪 Ушёл раньше
+⏰ Опоздал
+🏥 Уважительная причина
+
+📌 <b>За месяц:</b>
+📅 ${totals.fullDays}  ❌ ${totals.absent}  🚪 ${totals.left}  ⏰ ${totals.late}  🏥 ${totals.excused}`;
+
+    await editOrSend(env, chatId, messageId, text, {
+        inline_keyboard: [
+            [
+                {
+                    text: "◀️",
+                    callback_data: `parents_month:${shiftMonth(month, -1)}`
+                },
+                {
+                    text: `📅 ${monthTitle(month)}`,
+                    callback_data: "parents_noop"
+                },
+                {
+                    text: "▶️",
+                    callback_data: `parents_month:${shiftMonth(month, 1)}`
+                }
+            ],
+            [
+                {
+                    text: "📸 Скрин родителям",
+                    callback_data: `parents_shot:${month}`
+                }
+            ],
+            [
+                {
+                    text: "🔎 Подробно по ученику",
+                    callback_data: `parents_students:${month}`
+                }
+            ],
+            [
+                {
+                    text: "🏠 Главное меню",
+                    callback_data: "main"
+                }
+            ]
+        ]
+    });
+};
+
+async function showParentsScreenshot(env, chatId, messageId, month) {
+    const stats = await getParentsMonthStats(env, month);
+    const table = parentTable(stats);
+    const totals = parentsTotals(stats);
+
+    const text = `👨‍👩‍👦 <b>ПОСЕЩАЕМОСТЬ • ГРУППА 102</b>
+📊 <b>${monthTitle(month)}</b>
+━━━━━━━━━━━━━━━━━━
+
+<pre>${escapeHtml(table)}</pre>
+<b>Обозначения:</b>
+📅 — пропущен весь учебный день
+❌ — пропущены отдельные пары
+🚪 — ушёл раньше
+⏰ — опоздал
+🏥 — уважительная причина
+
+<b>Итого за месяц:</b>
+📅 ${totals.fullDays}   ❌ ${totals.absent}
+🚪 ${totals.left}   ⏰ ${totals.late}   🏥 ${totals.excused}`;
+
+    await editOrSend(env, chatId, messageId, text, {
+        inline_keyboard: [
+            [
+                {
+                    text: "⬅️ К сводке",
+                    callback_data: `parents_month:${month}`
+                }
+            ]
+        ]
+    });
+}
+
+showParentStudent = async function(env, chatId, messageId, month, studentId) {
+    await initLessonAttendance(env);
+
+    const student = await env.DB.prepare(`
+        SELECT id, name
+        FROM students
+        WHERE id = ?
+    `).bind(studentId).first();
+
+    if (!student) return;
+
+    const pairResult = await env.DB.prepare(`
+        SELECT date, lesson_no, status
+        FROM lesson_attendance
+        WHERE
+            student_id = ?
+            AND substr(date, 1, 7) = ?
+            AND status IN ('absent', 'left', 'late', 'excused')
+        ORDER BY date ASC, lesson_no ASC
+    `).bind(studentId, month).all();
+
+    const fullDayResult = await env.DB.prepare(`
+        SELECT a.date
+        FROM attendance a
+        WHERE
+            a.student_id = ?
+            AND substr(a.date, 1, 7) = ?
+            AND a.status = 'absent'
+            AND NOT EXISTS (
+                SELECT 1
+                FROM lesson_attendance l
+                WHERE l.student_id = a.student_id
+                  AND l.date = a.date
+            )
+        ORDER BY a.date ASC
+    `).bind(studentId, month).all();
+
+    const rows = pairResult.results || [];
+    const fullDays = fullDayResult.results || [];
+
+    let absent = 0, left = 0, late = 0, excused = 0;
+
+    for (const row of rows) {
+        if (row.status === "absent") absent++;
+        if (row.status === "left") left++;
+        if (row.status === "late") late++;
+        if (row.status === "excused") excused++;
+    }
+
+    let text = `👨‍👩‍👦 <b>ДЛЯ РОДИТЕЛЕЙ</b>
+
+👤 <b>${escapeHtml(student.name)}</b>
+📅 ${monthTitle(month)}
+
+━━━━━━━━━━━━━━
+📅 Пропущено полных дней: <b>${fullDays.length}</b>
+❌ Пропущено пар: <b>${absent}</b>
+🚪 Ушёл раньше: <b>${left}</b>
+⏰ Опозданий: <b>${late}</b>
+🏥 Уважительно: <b>${excused}</b>
+━━━━━━━━━━━━━━`;
+
+    if (!fullDays.length && !rows.length) {
+        text += `\n\n✅ Нарушений за месяц нет.`;
+    } else {
+        text += `\n\n📋 <b>Подробности:</b>`;
+
+        const events = [];
+
+        for (const row of fullDays) {
+            events.push({
+                date: row.date,
+                lesson: 0,
+                text: `📅 отсутствовал весь день`
+            });
+        }
+
+        for (const row of rows) {
+            let eventText = "";
+
+            if (row.status === "absent") {
+                eventText = `❌ не был на ${row.lesson_no}-й паре`;
+            } else if (row.status === "left") {
+                eventText = `🚪 ушёл с ${row.lesson_no}-й пары`;
+            } else if (row.status === "late") {
+                eventText = `⏰ опоздал на ${row.lesson_no}-ю пару`;
+            } else if (row.status === "excused") {
+                eventText = `🏥 уважительно, ${row.lesson_no}-я пара`;
+            }
+
+            events.push({
+                date: row.date,
+                lesson: Number(row.lesson_no || 0),
+                text: eventText
+            });
+        }
+
+        events.sort((a, b) =>
+            String(a.date).localeCompare(String(b.date)) ||
+            a.lesson - b.lesson
+        );
+
+        for (const event of events) {
+            const dateText = event.date
+                .split("-")
+                .reverse()
+                .slice(0, 2)
+                .join(".");
+
+            text += `\n${dateText} — ${event.text}`;
+        }
+    }
+
+    await editOrSend(env, chatId, messageId, text, {
+        inline_keyboard: [
+            [
+                {
+                    text: "⬅️ К ученикам",
+                    callback_data: `parents_students:${month}`
+                }
+            ],
+            [
+                {
+                    text: "📊 Общая сводка",
+                    callback_data: `parents_month:${month}`
+                }
+            ]
+        ]
+    });
+};
+
+const oldExtraCallbackParentsV2 = handleExtraCallback;
+
+handleExtraCallback = async function(
+    data,
+    env,
+    chatId,
+    messageId,
+    userId
+) {
+    if (data.startsWith("parents_shot:")) {
+        const month = data.split(":")[1];
+        await showParentsScreenshot(env, chatId, messageId, month);
+        return true;
+    }
+
+    return oldExtraCallbackParentsV2(
+        data,
+        env,
+        chatId,
+        messageId,
+        userId
+    );
+};
