@@ -7131,3 +7131,961 @@ async function answerSimple(
     text
   );
 }
+// =====================================================
+// ПОПАРНАЯ ПОСЕЩАЕМОСТЬ — БАЗА
+// =====================================================
+
+async function initLessonAttendance(env) {
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS lesson_attendance (
+      date TEXT NOT NULL,
+      lesson_no INTEGER NOT NULL,
+      student_id INTEGER NOT NULL,
+      status TEXT NOT NULL,
+
+      PRIMARY KEY (
+        date,
+        lesson_no,
+        student_id
+      )
+    )
+  `).run();
+}
+const originalInitDb = initDb;
+
+initDb = async function(env) {
+  await originalInitDb(env);
+  await initLessonAttendance(env);
+};
+// =====================================================
+// ПОПАРНАЯ ПОСЕЩАЕМОСТЬ
+// =====================================================
+
+function lessonsCountForDate(date) {
+  const day = dateWeekday(date);
+
+  // 0 вс, 1 пн, 2 вт, 3 ср, 4 чт, 5 пт, 6 сб
+  const schedule = {
+    1: 3,
+    2: 4,
+    3: 4,
+    4: 3,
+    5: 4
+  };
+
+  return schedule[day] || 4;
+}
+
+
+function pairStatusEmoji(status) {
+  const map = {
+    present: "✅",
+    absent: "❌",
+    late: "⏰",
+    excused: "🏥",
+    left: "🚪",
+    none: "➖"
+  };
+
+  return map[status] || "➖";
+}
+
+
+async function getPairStatuses(
+  env,
+  date
+) {
+  const result =
+    await env.DB.prepare(`
+      SELECT
+        lesson_no,
+        student_id,
+        status
+
+      FROM lesson_attendance
+
+      WHERE date = ?
+    `)
+      .bind(date)
+      .all();
+
+  const map = new Map();
+
+  for (
+    const row
+    of result.results || []
+  ) {
+    map.set(
+      `${row.student_id}:${row.lesson_no}`,
+      row.status
+    );
+  }
+
+  return map;
+}
+
+
+// =====================================================
+// ЭКРАН ДНЯ ПО ПАРАМ
+// =====================================================
+
+async function showPairsDay(
+  env,
+  chatId,
+  messageId,
+  date
+) {
+  const students =
+    await getActiveStudents(env);
+
+  const lessonCount =
+    lessonsCountForDate(date);
+
+  const statuses =
+    await getPairStatuses(
+      env,
+      date
+    );
+
+  const previous =
+    previousWorkday(date);
+
+  const next =
+    nextWorkday(date);
+
+  let text =
+`📚 <b>ПОСЕЩАЕМОСТЬ ПО ПАРАМ</b>
+
+📅 <b>${escapeHtml(
+  formatDateLong(date)
+)}</b>
+
+🔢 Пар сегодня: <b>${lessonCount}</b>
+
+━━━━━━━━━━━━━━
+
+Нажмите на студента 👇
+
+✅ был
+❌ не был
+⏰ опоздал
+🏥 уважительно
+🚪 ушёл
+➖ не отмечено`;
+
+  const keyboard = [];
+
+  keyboard.push([
+    {
+      text:
+        `◀️ ${formatDateShort(previous)}`,
+      callback_data:
+        `pairs:${previous}`
+    },
+    {
+      text:
+        isToday(date)
+          ? "📅 Сегодня"
+          : formatDateShort(date),
+      callback_data:
+        `pairs:${localDate()}`
+    },
+    {
+      text:
+        `${formatDateShort(next)} ▶️`,
+      callback_data:
+        `pairs:${next}`
+    }
+  ]);
+
+
+  for (
+    const student
+    of students
+  ) {
+    let marks = "";
+
+    for (
+      let lesson = 1;
+      lesson <= lessonCount;
+      lesson++
+    ) {
+      const status =
+        statuses.get(
+          `${student.id}:${lesson}`
+        ) || "none";
+
+      marks +=
+        `${lesson}${pairStatusEmoji(status)} `;
+    }
+
+    keyboard.push([
+      {
+        text:
+          `${student.name} • ${marks.trim()}`,
+        callback_data:
+          `pair_student:${date}:${student.id}`
+      }
+    ]);
+  }
+
+
+  keyboard.push([
+    {
+      text:
+        "👀 Кто был по парам",
+      callback_data:
+        `pairs_summary:${date}`
+    }
+  ]);
+
+  keyboard.push([
+    {
+      text:
+        "👥 Обычная посещаемость",
+      callback_data:
+        `attendance:${date}`
+    }
+  ]);
+
+  keyboard.push([
+    {
+      text:
+        "🏠 Главное меню",
+      callback_data:
+        "main"
+    }
+  ]);
+
+
+  await editOrSend(
+    env,
+    chatId,
+    messageId,
+    text,
+    {
+      inline_keyboard:
+        keyboard
+    }
+  );
+}
+
+
+// =====================================================
+// КАРТОЧКА СТУДЕНТА ПО ПАРАМ
+// =====================================================
+
+async function showPairStudent(
+  env,
+  chatId,
+  messageId,
+  date,
+  studentId
+) {
+  const student =
+    await env.DB.prepare(`
+      SELECT name
+
+      FROM students
+
+      WHERE
+        id = ?
+        AND active = 1
+    `)
+      .bind(studentId)
+      .first();
+
+  if (!student) {
+    return;
+  }
+
+  const lessonCount =
+    lessonsCountForDate(date);
+
+  const statuses =
+    await getPairStatuses(
+      env,
+      date
+    );
+
+  let text =
+`👤 <b>${escapeHtml(
+  student.name
+)}</b>
+
+📅 ${escapeHtml(
+  formatDateLong(date)
+)}
+
+━━━━━━━━━━━━━━
+
+Нажимайте на пару для смены статуса:
+
+➖ → ✅ → ❌ → ⏰ → 🏥 → ➖
+
+Если студент ушёл во время определённой пары —
+используйте кнопку 🚪 ниже.`;
+
+  const keyboard = [];
+
+
+  for (
+    let lesson = 1;
+    lesson <= lessonCount;
+    lesson++
+  ) {
+    const status =
+      statuses.get(
+        `${studentId}:${lesson}`
+      ) || "none";
+
+    keyboard.push([
+      {
+        text:
+          `${lesson}️⃣ пара — ${pairStatusEmoji(status)}`,
+        callback_data:
+          `pair_cycle:${date}:${lesson}:${studentId}`
+      }
+    ]);
+  }
+
+
+  const leaveButtons = [];
+
+  for (
+    let lesson = 1;
+    lesson <= lessonCount;
+    lesson++
+  ) {
+    leaveButtons.push({
+      text:
+        `🚪 ${lesson}`,
+      callback_data:
+        `pair_leave:${date}:${lesson}:${studentId}`
+    });
+
+    if (
+      leaveButtons.length === 3 ||
+      lesson === lessonCount
+    ) {
+      keyboard.push(
+        leaveButtons.splice(0)
+      );
+    }
+  }
+
+
+  keyboard.push([
+    {
+      text:
+        "⬅️ Все студенты",
+      callback_data:
+        `pairs:${date}`
+    }
+  ]);
+
+  keyboard.push([
+    {
+      text:
+        "👀 Сводка по парам",
+      callback_data:
+        `pairs_summary:${date}`
+    }
+  ]);
+
+
+  await editOrSend(
+    env,
+    chatId,
+    messageId,
+    text,
+    {
+      inline_keyboard:
+        keyboard
+    }
+  );
+}
+
+
+// =====================================================
+// СМЕНА СТАТУСА ОДНОЙ ПАРЫ
+// =====================================================
+
+async function cyclePairStatus(
+  env,
+  date,
+  lesson,
+  studentId
+) {
+  const current =
+    await env.DB.prepare(`
+      SELECT status
+
+      FROM lesson_attendance
+
+      WHERE
+        date = ?
+        AND lesson_no = ?
+        AND student_id = ?
+    `)
+      .bind(
+        date,
+        lesson,
+        studentId
+      )
+      .first();
+
+  const oldStatus =
+    current?.status || "none";
+
+  const next =
+    {
+      none: "present",
+      present: "absent",
+      absent: "late",
+      late: "excused",
+      excused: "none",
+      left: "none"
+    }[oldStatus] || "present";
+
+
+  if (next === "none") {
+    await env.DB.prepare(`
+      DELETE FROM lesson_attendance
+
+      WHERE
+        date = ?
+        AND lesson_no = ?
+        AND student_id = ?
+    `)
+      .bind(
+        date,
+        lesson,
+        studentId
+      )
+      .run();
+
+    return;
+  }
+
+
+  await env.DB.prepare(`
+    INSERT INTO lesson_attendance(
+      date,
+      lesson_no,
+      student_id,
+      status
+    )
+
+    VALUES(
+      ?,
+      ?,
+      ?,
+      ?
+    )
+
+    ON CONFLICT(
+      date,
+      lesson_no,
+      student_id
+    )
+
+    DO UPDATE SET
+      status = excluded.status
+  `)
+    .bind(
+      date,
+      lesson,
+      studentId,
+      next
+    )
+    .run();
+}
+
+
+// =====================================================
+// СТУДЕНТ УШЁЛ НА ОПРЕДЕЛЁННОЙ ПАРЕ
+// =====================================================
+
+async function markStudentLeft(
+  env,
+  date,
+  leaveLesson,
+  studentId
+) {
+  const lessonCount =
+    lessonsCountForDate(date);
+
+  for (
+    let lesson = 1;
+    lesson <= lessonCount;
+    lesson++
+  ) {
+    let status;
+
+    if (lesson < leaveLesson) {
+      status = "present";
+    } else if (
+      lesson === leaveLesson
+    ) {
+      status = "left";
+    } else {
+      status = "absent";
+    }
+
+    await env.DB.prepare(`
+      INSERT INTO lesson_attendance(
+        date,
+        lesson_no,
+        student_id,
+        status
+      )
+
+      VALUES(
+        ?,
+        ?,
+        ?,
+        ?
+      )
+
+      ON CONFLICT(
+        date,
+        lesson_no,
+        student_id
+      )
+
+      DO UPDATE SET
+        status = excluded.status
+    `)
+      .bind(
+        date,
+        lesson,
+        studentId,
+        status
+      )
+      .run();
+  }
+}
+
+
+// =====================================================
+// СВОДКА — КТО БЫЛ НА КАЖДОЙ ПАРЕ
+// =====================================================
+
+async function showPairsSummary(
+  env,
+  chatId,
+  messageId,
+  date
+) {
+  const students =
+    await getActiveStudents(env);
+
+  const lessonCount =
+    lessonsCountForDate(date);
+
+  const statuses =
+    await getPairStatuses(
+      env,
+      date
+    );
+
+  let text =
+`👀 <b>КТО БЫЛ ПО ПАРАМ</b>
+
+📅 <b>${escapeHtml(
+  formatDateLong(date)
+)}</b>
+
+━━━━━━━━━━━━━━`;
+
+
+  for (
+    let lesson = 1;
+    lesson <= lessonCount;
+    lesson++
+  ) {
+    const present = [];
+    const absent = [];
+    const late = [];
+    const excused = [];
+    const left = [];
+    const unmarked = [];
+
+
+    for (
+      const student
+      of students
+    ) {
+      const status =
+        statuses.get(
+          `${student.id}:${lesson}`
+        ) || "none";
+
+      if (status === "present") {
+        present.push(student.name);
+      } else if (
+        status === "absent"
+      ) {
+        absent.push(student.name);
+      } else if (
+        status === "late"
+      ) {
+        late.push(student.name);
+      } else if (
+        status === "excused"
+      ) {
+        excused.push(student.name);
+      } else if (
+        status === "left"
+      ) {
+        left.push(student.name);
+      } else {
+        unmarked.push(student.name);
+      }
+    }
+
+
+    text +=
+`\n\n<b>${lesson}️⃣ ПАРА</b>
+
+✅ Были: <b>${present.length}</b>`;
+
+    if (absent.length) {
+      text +=
+        `\n❌ Нет: ${absent
+          .map(escapeHtml)
+          .join(", ")}`;
+    }
+
+    if (late.length) {
+      text +=
+        `\n⏰ Опоздали: ${late
+          .map(escapeHtml)
+          .join(", ")}`;
+    }
+
+    if (left.length) {
+      text +=
+        `\n🚪 Ушли: ${left
+          .map(escapeHtml)
+          .join(", ")}`;
+    }
+
+    if (excused.length) {
+      text +=
+        `\n🏥 Уважительно: ${excused
+          .map(escapeHtml)
+          .join(", ")}`;
+    }
+
+    if (unmarked.length) {
+      text +=
+        `\n➖ Не отмечено: <b>${unmarked.length}</b>`;
+    }
+  }
+
+
+  await editOrSend(
+    env,
+    chatId,
+    messageId,
+    text,
+    {
+      inline_keyboard: [
+        [
+          {
+            text:
+              "⬅️ По парам",
+            callback_data:
+              `pairs:${date}`
+          }
+        ],
+        [
+          {
+            text:
+              "🏠 Главное меню",
+            callback_data:
+              "main"
+          }
+        ]
+      ]
+    }
+  );
+}
+
+
+// =====================================================
+// ПОДКЛЮЧАЕМ CALLBACK БЕЗ ПОИСКА СТАРОГО КОДА
+// =====================================================
+
+const oldExtraCallbackPairs =
+  handleExtraCallback;
+
+handleExtraCallback =
+  async function(
+    data,
+    env,
+    chatId,
+    messageId,
+    userId
+  ) {
+
+    if (data === "pairs") {
+      await showPairsDay(
+        env,
+        chatId,
+        messageId,
+        localDate()
+      );
+
+      return true;
+    }
+
+
+    if (
+      data.startsWith("pairs:")
+    ) {
+      const date =
+        data.split(":")[1];
+
+      if (isValidDate(date)) {
+        await showPairsDay(
+          env,
+          chatId,
+          messageId,
+          date
+        );
+      }
+
+      return true;
+    }
+
+
+    if (
+      data.startsWith(
+        "pair_student:"
+      )
+    ) {
+      const parts =
+        data.split(":");
+
+      const date =
+        parts[1];
+
+      const studentId =
+        Number(parts[2]);
+
+      await showPairStudent(
+        env,
+        chatId,
+        messageId,
+        date,
+        studentId
+      );
+
+      return true;
+    }
+
+
+    if (
+      data.startsWith(
+        "pair_cycle:"
+      )
+    ) {
+      const parts =
+        data.split(":");
+
+      const date =
+        parts[1];
+
+      const lesson =
+        Number(parts[2]);
+
+      const studentId =
+        Number(parts[3]);
+
+      await cyclePairStatus(
+        env,
+        date,
+        lesson,
+        studentId
+      );
+
+      await showPairStudent(
+        env,
+        chatId,
+        messageId,
+        date,
+        studentId
+      );
+
+      return true;
+    }
+
+
+    if (
+      data.startsWith(
+        "pair_leave:"
+      )
+    ) {
+      const parts =
+        data.split(":");
+
+      const date =
+        parts[1];
+
+      const lesson =
+        Number(parts[2]);
+
+      const studentId =
+        Number(parts[3]);
+
+      await markStudentLeft(
+        env,
+        date,
+        lesson,
+        studentId
+      );
+
+      await showPairStudent(
+        env,
+        chatId,
+        messageId,
+        date,
+        studentId
+      );
+
+      return true;
+    }
+
+
+    if (
+      data.startsWith(
+        "pairs_summary:"
+      )
+    ) {
+      const date =
+        data.split(":")[1];
+
+      await showPairsSummary(
+        env,
+        chatId,
+        messageId,
+        date
+      );
+
+      return true;
+    }
+
+
+    return oldExtraCallbackPairs(
+      data,
+      env,
+      chatId,
+      messageId,
+      userId
+    );
+  };
+
+
+// =====================================================
+// ДОБАВЛЯЕМ КНОПКУ В ГЛАВНОЕ МЕНЮ
+// =====================================================
+
+showMainMenu =
+  async function(
+    env,
+    chatId,
+    messageId = null
+  ) {
+
+    await editOrSend(
+      env,
+      chatId,
+      messageId,
+
+`📚 <b>ЖУРНАЛ ГРУППЫ №102</b>
+
+Выберите раздел 👇`,
+
+      {
+        inline_keyboard: [
+
+          [
+            {
+              text:
+                "📚 По парам",
+              callback_data:
+                "pairs"
+            }
+          ],
+
+          [
+            {
+              text:
+                "👥 Посещаемость",
+              callback_data:
+                "attendance"
+            },
+
+            {
+              text:
+                "👀 Кого нет",
+              callback_data:
+                "missing"
+            }
+          ],
+
+          [
+            {
+              text:
+                "📆 История",
+              callback_data:
+                "history"
+            },
+
+            {
+              text:
+                "🧹 Дежурство",
+              callback_data:
+                "duty"
+            }
+          ],
+
+          [
+            {
+              text:
+                "📊 Статистика",
+              callback_data:
+                "stats"
+            },
+
+            {
+              text:
+                "👨‍🎓 Студенты",
+              callback_data:
+                "students"
+            }
+          ],
+
+          [
+            {
+              text:
+                "📤 Excel",
+              callback_data:
+                "excel"
+            },
+
+            {
+              text:
+                "⚙️ Настройки",
+              callback_data:
+                "settings"
+            }
+          ]
+
+        ]
+      }
+    );
+  };
