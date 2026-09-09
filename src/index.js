@@ -3956,112 +3956,35 @@ showMainMenu =
                 String(d.getUTCMonth() + 1).padStart(2, "0"));
         }
         async function showParentsReport(env, chatId, messageId, month) {
-            await initLessonAttendance(env);
-            const students = await getActiveStudents(env);
-            const rows = await env.DB.prepare(`
-      SELECT
-        student_id,
-
-        SUM(
-          CASE
-            WHEN status = 'absent'
-            THEN 1
-            ELSE 0
-          END
-        ) AS absent_count,
-
-        SUM(
-          CASE
-            WHEN status = 'left'
-            THEN 1
-            ELSE 0
-          END
-        ) AS left_count,
-
-        SUM(
-          CASE
-            WHEN status = 'late'
-            THEN 1
-            ELSE 0
-          END
-        ) AS late_count,
-
-        SUM(
-          CASE
-            WHEN status IN ('excused', 'sick')
-            THEN 1 ELSE 0
-          END
-        ) AS sick,
-
-        SUM(
-          CASE
-            WHEN status = 'application'
-            THEN 1 ELSE 0
-          END
-        ) AS application_count
-
-      FROM lesson_attendance
-
-      WHERE substr(date, 1, 7) = ?
-
-      GROUP BY student_id
-    `)
-                .bind(month)
-                .all();
-            const stats = new Map();
-            for (const row of rows.results || []) {
-                stats.set(Number(row.student_id), row);
-            }
+            const rows = await parentsApi(env, month);
             let text = `👨‍👩‍👦 <b>ДЛЯ РОДИТЕЛЕЙ</b>
 📊 <b>${monthTitle(month)} • ГРУППА 102</b>
 ━━━━━━━━━━━━━━
 
 `;
-            for (const student of students) {
-                const row = stats.get(Number(student.id)) || {};
-                const absent = Number(row.absent_count || 0);
-                const left = Number(row.left_count || 0);
-                const late = Number(row.late_count || 0);
-                const excused = Number(row.excused_count || 0);
-                text +=
-                    `${escapeHtml(parentShortName(student.name))}  ❌${absent} 🚪${left} ⏰${late} 🤒${excused}
+            for (const row of rows) {
+                text += `${escapeHtml(parentShortName(row.name))}  📅${row.full_days} ❌${row.absent} 🚪${row.left} ⏰${row.late} 🤒${row.sick} 📝${row.application} ↔️${row.partial_days || 0}
 `;
             }
-            text +=
-                `
+            text += `
 ━━━━━━━━━━━━━━
+📅 полный день отсутствия
 ❌ пропущено пар
 🚪 ушёл раньше
 ⏰ опоздания
-🤒 болеет`;
+🤒 полных дней болезни
+📝 полных дней по заявлению
+↔️ частичное посещение`;
+
             await editOrSend(env, chatId, messageId, text, {
                 inline_keyboard: [
                     [
-                        {
-                            text: "◀️",
-                            callback_data: `parents_month:${shiftMonth(month, -1)}`
-                        },
-                        {
-                            text: `📅 ${monthTitle(month)}`,
-                            callback_data: "parents_noop"
-                        },
-                        {
-                            text: "▶️",
-                            callback_data: `parents_month:${shiftMonth(month, 1)}`
-                        }
+                        {text:"◀️",callback_data:`parents_month:${shiftMonth(month,-1)}`},
+                        {text:`📅 ${monthTitle(month)}`,callback_data:"parents_noop"},
+                        {text:"▶️",callback_data:`parents_month:${shiftMonth(month,1)}`}
                     ],
-                    [
-                        {
-                            text: "🔎 Подробно по ученику",
-                            callback_data: `parents_students:${month}`
-                        }
-                    ],
-                    [
-                        {
-                            text: "🏠 Главное меню",
-                            callback_data: "main"
-                        }
-                    ]
+                    [{text:"🔎 Подробно по ученику",callback_data:`parents_students:${month}`}],
+                    [{text:"🏠 Главное меню",callback_data:"main"}]
                 ]
             });
         }
@@ -4091,122 +4014,41 @@ showMainMenu =
             });
         }
         async function showParentStudent(env, chatId, messageId, month, studentId) {
-            await initLessonAttendance(env);
-            const student = await env.DB.prepare(`
-      SELECT
-        id,
-        name
+            const student = await env.DB.prepare(`SELECT id,name FROM students WHERE id=?`).bind(studentId).first();
+            if(!student)return;
 
-      FROM students
+            const smart=await smartMonthData(env,month);
+            const row=smart.rows.find(x=>Number(x.id)===Number(studentId));
+            const days=(row?.days||[]).filter(x=>x.kind!=="present"&&x.kind!=="none");
 
-      WHERE id = ?
-    `)
-                .bind(studentId)
-                .first();
-            if (!student) {
-                return;
-            }
-            const result = await env.DB.prepare(`
-      SELECT
-        date,
-        lesson_no,
-        status
-
-      FROM lesson_attendance
-
-      WHERE
-        student_id = ?
-        AND substr(date, 1, 7) = ?
-        AND status IN (
-          'absent',
-          'left',
-          'late',
-          'excused'
-        )
-
-      ORDER BY
-        date ASC,
-        lesson_no ASC
-    `)
-                .bind(studentId, month)
-                .all();
-            const rows = result.results || [];
-            let absent = 0;
-            let left = 0;
-            let late = 0;
-            let excused = 0;
-            for (const row of rows) {
-                if (row.status === "absent") {
-                    absent++;
-                }
-                if (row.status === "left") {
-                    left++;
-                }
-                if (row.status === "late") {
-                    late++;
-                }
-                if (row.status === "excused") {
-                    excused++;
-                }
-            }
-            let text = `👨‍👩‍👦 <b>ДЛЯ РОДИТЕЛЕЙ</b>
+            let text=`👨‍👩‍👦 <b>ДЛЯ РОДИТЕЛЕЙ</b>
 
 👤 <b>${escapeHtml(student.name)}</b>
-
 📅 ${monthTitle(month)}
 
 ━━━━━━━━━━━━━━
-❌ Пропущено пар: <b>${absent}</b>
-🚪 Ушёл раньше: <b>${left}</b>
-⏰ Опозданий: <b>${late}</b>
-🤒 Болеет: <b>${sick}</b>
-📝 По заявлению: <b>${application}</b>
+📅 Полных дней отсутствия: <b>${row?.full_days||0}</b>
+❌ Пропущено пар: <b>${row?.absent||0}</b>
+🚪 Уходов раньше: <b>${row?.left||0}</b>
+⏰ Опозданий: <b>${row?.late||0}</b>
+🤒 Полных дней болезни: <b>${row?.sick||0}</b>
+📝 Полных дней по заявлению: <b>${row?.application||0}</b>
+↔️ Частичных дней: <b>${row?.partial_days||0}</b>
 ━━━━━━━━━━━━━━`;
-            if (!rows.length) {
-                text +=
-                    `\n\n✅ Нарушений за месяц нет.`;
-            }
+
+            if(!days.length) text += `\n\n✅ Особых отметок за месяц нет.`;
             else {
-                text +=
-                    `\n\n📅 <b>Подробности:</b>`;
-                for (const row of rows) {
-                    const dateText = row.date
-                        .split("-")
-                        .reverse()
-                        .slice(0, 2)
-                        .join(".");
-                    if (row.status === "absent") {
-                        text +=
-                            `\n${dateText} — ❌ не был на ${row.lesson_no}-й паре`;
-                    }
-                    if (row.status === "left") {
-                        text +=
-                            `\n${dateText} — 🚪 ушёл с ${row.lesson_no}-й пары`;
-                    }
-                    if (row.status === "late") {
-                        text +=
-                            `\n${dateText} — ⏰ опоздал на ${row.lesson_no}-ю пару`;
-                    }
-                    if (row.status === "excused") {
-                        text +=
-                            `\n${dateText} — 🤒 болеет, ${row.lesson_no}-я пара`;
-                    }
+                text += `\n\n📅 <b>По дням:</b>`;
+                for(const d of days){
+                    const dt=d.date.split("-").reverse().slice(0,2).join(".");
+                    text += `\n${dt} — ${escapeHtml(d.label)}`;
                 }
             }
-            await editOrSend(env, chatId, messageId, text, {
-                inline_keyboard: [
-                    [
-                        {
-                            text: "⬅️ К ученикам",
-                            callback_data: `parents_students:${month}`
-                        }
-                    ],
-                    [
-                        {
-                            text: "📊 Общая сводка",
-                            callback_data: `parents_month:${month}`
-                        }
-                    ]
+
+            await editOrSend(env,chatId,messageId,text,{
+                inline_keyboard:[
+                    [{text:"⬅️ К ученикам",callback_data:`parents_students:${month}`}],
+                    [{text:"📊 Общая сводка",callback_data:`parents_month:${month}`}]
                 ]
             });
         }
@@ -4794,7 +4636,7 @@ handleExtraCallback = async function(
 
 
 
-const WEB_APP_HTML = "<!doctype html>\n<html lang=\"ru\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">\n<meta name=\"theme-color\" content=\"#10131a\">\n<title>Журнал группы 102</title>\n<style>\n:root{--bg:#0d1016;--panel:#151a23;--panel2:#1c2330;--text:#f5f7fb;--muted:#9da9bb;--line:#2a3445;--accent:#5b8cff;--good:#39c98a;--bad:#ff5d69;--warn:#ffbe55;--radius:18px}\n*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}\nbutton,input,select,textarea{font:inherit}.hidden{display:none!important}.muted{color:var(--muted)}.small{font-size:12px}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}\n#auth{min-height:100vh;display:grid;place-items:center;padding:22px}.auth-card{width:min(440px,100%);background:var(--panel);border:1px solid var(--line);border-radius:26px;padding:24px;box-shadow:0 24px 70px #0008}.brand{display:flex;gap:14px;align-items:center;margin-bottom:22px}.logo{width:58px;height:58px;border-radius:16px;background:linear-gradient(135deg,#315fe9,#71a1ff);display:grid;place-items:center;font-size:30px}.auth-tabs{display:flex;background:var(--panel2);border-radius:14px;padding:4px;margin:16px 0}.auth-tabs button{flex:1;border:0;background:none;color:var(--muted);padding:10px;border-radius:10px}.auth-tabs button.on{background:#2a3445;color:#fff}.field{display:flex;flex-direction:column;gap:7px;margin:12px 0}.field input,.field select,.field textarea{background:#0f141d;color:#fff;border:1px solid var(--line);border-radius:12px;padding:12px}.btn{border:0;border-radius:12px;padding:11px 15px;background:var(--accent);color:#fff;font-weight:700;cursor:pointer}.btn.secondary{background:var(--panel2);border:1px solid var(--line)}.btn.danger{background:#5b2228}.btn.ghost{background:transparent;border:1px solid var(--line)}.btn:disabled{opacity:.45}.code{font-size:38px;letter-spacing:8px;text-align:center;font-weight:900;margin:14px 0}\n#shell{min-height:100vh}.sidebar{position:fixed;inset:0 auto 0 0;width:260px;background:#10151e;border-right:1px solid var(--line);padding:18px 12px;overflow:auto;z-index:20}.side-brand{padding:8px 10px 18px;font-size:20px;font-weight:900}.navbtn{width:100%;display:flex;gap:10px;align-items:center;border:0;background:transparent;color:#c3ccda;padding:11px 12px;border-radius:12px;text-align:left;cursor:pointer;margin:2px 0}.navbtn.on,.navbtn:hover{background:var(--panel2);color:#fff}.main{margin-left:260px;min-height:100vh}.topbar{height:68px;position:sticky;top:0;z-index:10;background:#0d1016e8;backdrop-filter:blur(12px);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;padding:0 22px}.topbar h1{font-size:20px;margin:0}.spacer{flex:1}.search{max-width:320px;width:35%;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:9px 12px;color:#fff}.content{padding:22px;max-width:1500px;margin:auto}.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px}.metric{font-size:30px;font-weight:900;margin-top:8px}.section-head{display:flex;align-items:center;gap:10px;margin-bottom:14px}.section-head h2{margin:0;font-size:21px}.section-head .actions{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:14px}.table{width:100%;border-collapse:collapse;min-width:680px}.table th,.table td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left}.table th{color:var(--muted);font-size:12px;text-transform:uppercase;position:sticky;top:0;background:var(--panel)}.statusbtn{border:1px solid var(--line);background:#0f141d;color:#fff;border-radius:10px;padding:7px 10px;cursor:pointer;white-space:nowrap}.student{display:flex;align-items:center;gap:10px}.avatar{width:34px;height:34px;border-radius:10px;background:#26334a;display:grid;place-items:center;font-weight:800}.pill{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:4px 8px;font-size:12px}.list{display:flex;flex-direction:column;gap:8px}.list-item{display:flex;align-items:center;gap:10px;padding:11px;background:var(--panel2);border-radius:12px}.modal-bg{position:fixed;inset:0;background:#0009;z-index:50;display:grid;place-items:center;padding:18px}.modal{width:min(650px,100%);max-height:90vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:18px}.modal h3{margin-top:0}.status-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.status-grid button{padding:14px 8px}.tabs{display:flex;gap:6px;overflow:auto;margin-bottom:12px}.tabs button{white-space:nowrap}.calendar{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}.day{min-height:90px;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:8px}.day strong{display:block}.chart{display:flex;align-items:end;gap:5px;height:160px;border-bottom:1px solid var(--line);padding:8px}.bar{flex:1;background:var(--accent);min-width:10px;border-radius:6px 6px 0 0;opacity:.85}.toast{position:fixed;right:18px;bottom:18px;background:#202939;border:1px solid var(--line);padding:12px 16px;border-radius:12px;z-index:80}.mobile-nav{display:none}\n@media(max-width:1000px){.grid{grid-template-columns:repeat(2,1fr)}.sidebar{width:220px}.main{margin-left:220px}}\n@media(max-width:760px){.sidebar{display:none}.main{margin:0}.topbar{height:58px;padding:0 12px}.topbar .search{display:none}.content{padding:12px 12px 86px}.grid{grid-template-columns:1fr 1fr;gap:9px}.card{padding:13px;border-radius:15px}.metric{font-size:25px}.mobile-nav{display:flex;position:fixed;bottom:0;left:0;right:0;background:#10151ef3;border-top:1px solid var(--line);z-index:30;padding:7px 6px max(7px,env(safe-area-inset-bottom));justify-content:space-around}.mobile-nav button{border:0;background:none;color:#aab4c4;font-size:11px;min-width:54px;flex:1;padding:4px 2px}.mobile-nav button b{display:block;font-size:21px}.mobile-nav button.on{color:#fff}.section-head{align-items:flex-start}.section-head .actions{flex-direction:column}.calendar{gap:4px}.day{min-height:72px;padding:5px;font-size:11px}.status-grid{grid-template-columns:1fr 1fr}}\n\n.perm-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:10px}\n.perm-card{display:flex;align-items:center;gap:10px;padding:12px;border:1px solid var(--line);border-radius:14px;background:var(--panel2);cursor:pointer;user-select:none}\n.perm-card.on{border-color:#5b8cff;background:#1e2b44}\n.perm-card input{display:none}\n.perm-icon{font-size:22px;width:28px;text-align:center}\n.perm-text{display:flex;flex-direction:column;gap:2px}\n.perm-text b{font-size:14px}\n.perm-text span{font-size:11px;color:var(--muted)}\n@media(max-width:760px){.perm-grid{grid-template-columns:1fr}}\n\n</style>\n<script src=\"https://telegram.org/js/telegram-web-app.js\"></script>\n</head>\n<body>\n<div id=\"auth\">\n  <div class=\"auth-card\">\n    <div class=\"brand\"><div class=\"logo\">📚</div><div><h2 style=\"margin:0\">Журнал группы 102</h2><div class=\"muted\">Закрытая система преподавателя</div></div></div>\n    <div id=\"tgAuto\" class=\"muted small\">Из Telegram вход выполняется автоматически. При прямом открытии сайта — только логин и пароль.</div>\n    <form id=\"passPane\">\n      <div class=\"field\"><label>Логин</label><input id=\"login\" autocomplete=\"username\"></div>\n      <div class=\"field\"><label>Пароль</label><input id=\"password\" type=\"password\" autocomplete=\"current-password\"></div>\n      <button class=\"btn\" style=\"width:100%\">Войти</button>\n    </form>\n    <div class=\"small muted\" style=\"margin-top:12px\">🔒 Самостоятельной регистрации нет. Доступ создаёт владелец.</div>\n    <div id=\"authMsg\" class=\"small\" style=\"margin-top:12px;color:#ffbe55\"></div>\n  </div>\n</div>\n\n<div id=\"shell\" class=\"hidden\">\n  <aside class=\"sidebar\">\n    <div class=\"side-brand\">📚 Журнал 102</div>\n    <div id=\"sideNav\"></div>\n  </aside>\n  <main class=\"main\">\n    <div class=\"topbar\"><h1 id=\"pageTitle\">Главная</h1><div class=\"spacer\"></div><input class=\"search\" id=\"globalSearch\" placeholder=\"🔎 Поиск\"><button class=\"btn secondary\" id=\"logout\">Выйти</button></div>\n    <div class=\"content\" id=\"content\"></div>\n  </main>\n  <div class=\"mobile-nav\" id=\"mobileNav\"></div>\n</div>\n<div id=\"modalRoot\"></div>\n<script>\n(function(){\nvar state={me:null,page:'dashboard',students:[],date:new Date().toISOString().slice(0,10),month:new Date().toISOString().slice(0,7)};\nvar nav=[\n ['dashboard','🏠','Главная'],['journal','👥','Журнал'],['pairs','📚','По парам'],['students','👤','Студенты'],\n ['calendar','📅','Календарь'],['health','🤒','Болезни и заявления'],['duty','🧹','Дежурство'],\n ['schedule','🗓️','Расписание'],['parents','👨‍👩‍👦','Родителям'],['analytics','📊','Аналитика'],\n ['reports','📄','Отчёты'],['online','🟢','Онлайн'],['users','👥','Пользователи'],\n ['audit','🛡','Журнал действий'],['settings','⚙️','Настройки']\n];\nvar statusOrder=['none','present','absent','late','sick','application','left'];\nvar statusMeta={none:['➖','Не отмечено'],present:['✅','Присутствует'],absent:['❌','Отсутствует'],late:['⏰','Опоздал'],sick:['🤒','Болеет'],application:['📝','По заявлению'],left:['🚪','Ушёл раньше'],excused:['🤒','Болеет']};\nfunction esc(x){return String(x==null?'':x).replace(/[&<>\"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]})}\nasync function api(path,opt){opt=opt||{};opt.headers=Object.assign({'content-type':'application/json'},opt.headers||{});var r=await fetch(path,opt);var ct=r.headers.get('content-type')||'';if(r.status===401){showAuth();throw new Error('Нужен вход')}if(!r.ok){var e=ct.includes('json')?await r.json():{error:await r.text()};throw new Error(e.error||'Ошибка')}return ct.includes('json')?r.json():r}\nfunction toast(t){var d=document.createElement('div');d.className='toast';d.textContent=t;document.body.appendChild(d);setTimeout(function(){d.remove()},2200)}\nfunction fmtDate(d){try{return new Date(d+'T12:00:00').toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'})}catch(e){return d}}\nfunction showAuth(){document.getElementById('auth').classList.remove('hidden');document.getElementById('shell').classList.add('hidden')}\nfunction showShell(){document.getElementById('auth').classList.add('hidden');document.getElementById('shell').classList.remove('hidden');renderNav();go('dashboard')}\nfunction renderNav(){var html='';nav.forEach(function(n){if((n[0]==='users'||n[0]==='audit'||n[0]==='settings')&&state.me.role!=='owner')return;html+='<button class=\"navbtn '+(state.page===n[0]?'on':'')+'\" data-p=\"'+n[0]+'\"><span>'+n[1]+'</span>'+n[2]+'</button>'});document.getElementById('sideNav').innerHTML=html;document.querySelectorAll('.navbtn').forEach(function(b){b.onclick=function(){go(b.dataset.p)}});var mobileMain=nav.filter(function(n){return ['dashboard','journal','pairs','students'].includes(n[0])}).map(function(n){return '<button data-p=\"'+n[0]+'\" class=\"'+(state.page===n[0]?'on':'')+'\"><b>'+n[1]+'</b>'+n[2]+'</button>'}).join('');\nvar moreActive=['calendar','health','duty','schedule','parents','analytics','reports','online','users','audit','settings'].includes(state.page);\nmobileMain+='<button id=\"mobileMore\" class=\"'+(moreActive?'on':'')+'\"><b>☰</b>Ещё</button>';\ndocument.getElementById('mobileNav').innerHTML=mobileMain;\ndocument.querySelectorAll('#mobileNav [data-p]').forEach(function(b){b.onclick=function(){go(b.dataset.p)}});\nvar mb=document.getElementById('mobileMore');if(mb)mb.onclick=openMoreMenu}\nasync function go(p){state.page=p;renderNav();var n=nav.find(function(x){return x[0]===p});document.getElementById('pageTitle').textContent=n?n[2]:'';var c=document.getElementById('content');c.innerHTML='<div class=\"card\">Загрузка…</div>';try{var fn=pages[p]||pages.dashboard;await fn(c)}catch(e){c.innerHTML='<div class=\"card\">⚠️ '+esc(e.message)+'</div>'}}\nfunction metric(label,val,sub){return '<div class=\"card\"><div class=\"muted\">'+label+'</div><div class=\"metric\">'+val+'</div><div class=\"small muted\">'+(sub||'')+'</div></div>'}\nasync function loadStudents(){state.students=(await api('/api/students')).students;return state.students}\nfunction studentName(id){var s=state.students.find(function(x){return Number(x.id)===Number(id)});return s?s.name:'#'+id}\nfunction statusButton(st,id,kind,date,lesson){var m=statusMeta[st]||statusMeta.none;return '<button class=\"statusbtn\" data-kind=\"'+kind+'\" data-id=\"'+id+'\" data-status=\"'+st+'\" data-date=\"'+date+'\" '+(lesson?'data-lesson=\"'+lesson+'\"':'')+'>'+m[0]+' '+m[1]+'</button>'}\nfunction bindStatusButtons(){document.querySelectorAll('.statusbtn').forEach(function(b){b.onclick=function(){openStatus(b.dataset.kind,b.dataset.id,b.dataset.date,b.dataset.lesson)}})}\nfunction openStatus(kind,id,date,lesson){var buttons=statusOrder.map(function(st){var m=statusMeta[st];return '<button class=\"btn secondary\" data-st=\"'+st+'\">'+m[0]+' '+m[1]+'</button>'}).join('');modal('<h3>'+esc(studentName(id))+'</h3><div class=\"status-grid\">'+buttons+'</div>');document.querySelectorAll('#modalRoot [data-st]').forEach(function(b){b.onclick=async function(){await api(kind==='pair'?'/api/pairs':'/api/attendance',{method:'POST',body:JSON.stringify({student_id:Number(id),date:date,lesson_no:lesson?Number(lesson):undefined,status:b.dataset.st})});closeModal();toast('Сохранено');go(state.page)}})}\nfunction modal(html){document.getElementById('modalRoot').innerHTML='<div class=\"modal-bg\"><div class=\"modal\">'+html+'<div style=\"margin-top:14px\"><button class=\"btn ghost\" id=\"closeModal\">Закрыть</button></div></div></div>';document.getElementById('closeModal').onclick=closeModal}\nfunction closeModal(){document.getElementById('modalRoot').innerHTML=''}\n\n\nfunction openMoreMenu(){\n  var allowed=nav.filter(function(n){\n    if(['dashboard','journal','pairs','students'].includes(n[0])) return false;\n    if((n[0]==='users'||n[0]==='audit'||n[0]==='settings')&&state.me.role!=='owner') return false;\n    return true;\n  });\n  modal('<h3>☰ Ещё</h3><div class=\"list\">'+allowed.map(function(n){\n    return '<button class=\"list-item\" style=\"width:100%;border:0;color:inherit;text-align:left;cursor:pointer\" data-more=\"'+n[0]+'\"><span style=\"font-size:22px\">'+n[1]+'</span><b>'+n[2]+'</b></button>';\n  }).join('')+'</div>');\n  document.querySelectorAll('[data-more]').forEach(function(b){b.onclick=function(){var p=b.dataset.more;closeModal();go(p)}});\n}\nvar pages={};\npages.dashboard=async function(c){var d=await api('/api/dashboard');c.innerHTML='<div class=\"grid\">'+metric('👥 Учеников',d.students)+metric('❌ Нет сегодня',d.absent)+metric('🤒 Болеют',d.sick)+metric('📝 По заявлению',d.application)+'</div><div class=\"grid\" style=\"margin-top:14px;grid-template-columns:2fr 1fr\"><div class=\"card\"><div class=\"section-head\"><h2>Сегодня</h2></div><div class=\"list\">'+(d.today.map(function(x){return '<div class=\"list-item\"><div>'+x.icon+'</div><div><b>'+esc(x.name)+'</b><div class=\"muted small\">'+esc(x.text)+'</div></div></div>'}).join('')||'<div class=\"muted\">Событий нет</div>')+'</div></div><div class=\"card\"><h2 style=\"margin-top:0\">🧹 Дежурные</h2><div>'+((d.duty||[]).map(function(x){return '<div class=\"pill\" style=\"margin:3px\">'+esc(x.name)+'</div>'}).join('')||'<span class=\"muted\">Не назначены</span>')+'</div></div></div>'}\npages.journal=async function(c){await loadStudents();var d=await api('/api/attendance?date='+state.date);var rows=state.students.map(function(s){var st=d.statuses[String(s.id)]||'none';return '<tr><td><div class=\"student\"><div class=\"avatar\">'+esc(s.name[0])+'</div><b>'+esc(s.name)+'</b></div></td><td>'+statusButton(st,s.id,'day',state.date)+'</td></tr>'}).join('');c.innerHTML='<div class=\"section-head\"><h2>👥 Посещаемость</h2><div class=\"actions\"><input type=\"date\" id=\"journalDate\" value=\"'+state.date+'\"><button class=\"btn secondary\" id=\"allPresent\">✅ Все есть</button></div></div><div class=\"table-wrap\"><table class=\"table\"><thead><tr><th>Ученик</th><th>Статус</th></tr></thead><tbody>'+rows+'</tbody></table></div>';document.getElementById('journalDate').onchange=function(){state.date=this.value;go('journal')};document.getElementById('allPresent').onclick=async function(){await api('/api/attendance/all-present',{method:'POST',body:JSON.stringify({date:state.date})});toast('Все отмечены');go('journal')};bindStatusButtons()}\npages.pairs=async function(c){await loadStudents();var d=await api('/api/pairs?date='+state.date);var lessons=d.lessons||4;var head='<th>Ученик</th>';for(var l=1;l<=lessons;l++)head+='<th>'+l+' пара</th>';var rows=state.students.map(function(s){var t='<tr><td><b>'+esc(s.name)+'</b></td>';for(var l=1;l<=lessons;l++){var st=(d.statuses[String(l)]||{})[String(s.id)]||'none';t+='<td>'+statusButton(st,s.id,'pair',state.date,l)+'</td>'}return t+'</tr>'}).join('');c.innerHTML='<div class=\"section-head\"><h2>📚 По парам</h2><div class=\"actions\"><input type=\"date\" id=\"pairDate\" value=\"'+state.date+'\"></div></div><div class=\"table-wrap\"><table class=\"table\"><thead><tr>'+head+'</tr></thead><tbody>'+rows+'</tbody></table></div>';document.getElementById('pairDate').onchange=function(){state.date=this.value;go('pairs')};bindStatusButtons()}\npages.students=async function(c){await loadStudents();c.innerHTML='<div class=\"section-head\"><h2>👤 Студенты</h2><div class=\"actions\"><button class=\"btn\" id=\"addStudent\">+ Добавить</button></div></div><div class=\"list\">'+state.students.map(function(s){return '<div class=\"list-item\"><div class=\"avatar\">'+esc(s.name[0])+'</div><div style=\"flex:1\"><b>'+esc(s.name)+'</b></div><button class=\"btn secondary\" data-card=\"'+s.id+'\">Карточка</button></div>'}).join('')+'</div>';document.getElementById('addStudent').onclick=function(){modal('<h3>Новый ученик</h3><div class=\"field\"><input id=\"newStudent\" placeholder=\"Фамилия Имя\"></div><button class=\"btn\" id=\"saveStudent\">Добавить</button>');document.getElementById('saveStudent').onclick=async function(){await api('/api/students',{method:'POST',body:JSON.stringify({name:document.getElementById('newStudent').value})});closeModal();toast('Добавлен');go('students')}};document.querySelectorAll('[data-card]').forEach(function(b){b.onclick=async function(){var d=await api('/api/student/'+b.dataset.card);modal('<h3>'+esc(d.student.name)+'</h3><div class=\"grid\">'+metric('Посещаемость',d.attendance_percent+'%')+metric('❌ Пропуски',d.absent)+metric('🤒 Болеет',d.sick)+metric('📝 Заявления',d.application)+'</div><h3>Последние события</h3><div class=\"list\">'+d.events.map(function(e){var sm=statusMeta[e.status]||['',''];var extra=e.source==='pair'&&e.lesson_no?' · '+e.lesson_no+' пара':'';return '<div class=\"list-item\">'+esc(e.date)+' · '+esc(sm[0]+' '+sm[1]+extra)+'</div>'}).join('')+'</div>')}})}\npages.calendar=async function(c){var d=await api('/api/calendar?month='+state.month);var first=new Date(state.month+'-01T12:00:00'),start=(first.getDay()+6)%7,days=new Date(first.getFullYear(),first.getMonth()+1,0).getDate(),cells='';for(var i=0;i<start;i++)cells+='<div></div>';for(var x=1;x<=days;x++){var ds=state.month+'-'+String(x).padStart(2,'0'),q=d.days[ds]||{};cells+='<div class=\"day\"><strong>'+x+'</strong><div>❌ '+(q.absent||0)+'</div><div>🤒 '+(q.sick||0)+' · 📝 '+(q.application||0)+'</div></div>'}c.innerHTML='<div class=\"section-head\"><h2>📅 Календарь</h2><div class=\"actions\"><input type=\"month\" id=\"calMonth\" value=\"'+state.month+'\"></div></div><div class=\"calendar\">'+cells+'</div>';document.getElementById('calMonth').onchange=function(){state.month=this.value;go('calendar')}}\npages.health=async function(c){var d=await api('/api/health?month='+state.month);c.innerHTML='<div class=\"section-head\"><h2>🤒 Болезни и заявления</h2><div class=\"actions\"><input type=\"month\" id=\"healthMonth\" value=\"'+state.month+'\"></div></div><div class=\"grid\">'+metric('🤒 Болезни',d.sick_total)+metric('📝 Заявления',d.application_total)+'</div><div class=\"card\" style=\"margin-top:14px\"><div class=\"list\">'+d.rows.map(function(x){return '<div class=\"list-item\"><b style=\"flex:1\">'+esc(x.name)+'</b><span class=\"pill\">🤒 '+x.sick+'</span><span class=\"pill\">📝 '+x.application+'</span></div>'}).join('')+'</div></div>';document.getElementById('healthMonth').onchange=function(){state.month=this.value;go('health')}}\npages.duty=async function(c){await loadStudents();var d=await api('/api/duty?date='+state.date);var chosen=new Set((d.students||[]).map(function(x){return Number(x.id)}));c.innerHTML='<div class=\"section-head\"><h2>🧹 Дежурство</h2><div class=\"actions\"><input type=\"date\" id=\"dutyDate\" value=\"'+state.date+'\"></div></div><div class=\"card\"><div class=\"list\">'+state.students.map(function(s){return '<label class=\"list-item\"><input type=\"checkbox\" data-duty=\"'+s.id+'\" '+(chosen.has(Number(s.id))?'checked':'')+'><span>'+esc(s.name)+'</span></label>'}).join('')+'</div><button class=\"btn\" id=\"saveDuty\" style=\"margin-top:12px\">Сохранить</button></div>';document.getElementById('dutyDate').onchange=function(){state.date=this.value;go('duty')};document.getElementById('saveDuty').onclick=async function(){var ids=[].slice.call(document.querySelectorAll('[data-duty]:checked')).map(function(x){return Number(x.dataset.duty)});await api('/api/duty',{method:'POST',body:JSON.stringify({date:state.date,student_ids:ids})});toast('Сохранено')}}\npages.schedule=async function(c){var d=await api('/api/schedule');var days=['Понедельник','Вторник','Среда','Четверг','Пятница'];c.innerHTML='<div class=\"section-head\"><h2>🗓️ Расписание</h2><div class=\"actions\">'+(state.me.role==='owner'?'<button class=\"btn\" id=\"editSchedule\">Редактировать</button>':'')+'</div></div>'+days.map(function(day,i){var arr=d.days[String(i+1)]||[];return '<div class=\"card\" style=\"margin-bottom:10px\"><b>'+day+'</b><div class=\"list\" style=\"margin-top:10px\">'+arr.map(function(x){return '<div class=\"list-item\"><span class=\"pill\">'+x.lesson_no+'</span><div><b>'+esc(x.subject)+'</b><div class=\"small muted\">'+esc(x.time||'')+(x.teacher?' · '+esc(x.teacher):'')+(x.room?' · каб. '+esc(x.room):'')+'</div></div></div>'}).join('')+'</div></div>'}).join('');var eb=document.getElementById('editSchedule');if(eb)eb.onclick=function(){modal('<h3>Редактирование расписания</h3><p class=\"muted\">В этой версии расписание редактируется через таблицу: выберите день и пару, затем сохраните.</p><div class=\"field\"><select id=\"schDay\">'+days.map(function(x,i){return '<option value=\"'+(i+1)+'\">'+x+'</option>'}).join('')+'</select></div><div class=\"field\"><input id=\"schLesson\" type=\"number\" min=\"1\" max=\"8\" placeholder=\"Номер пары\"></div><div class=\"field\"><input id=\"schSubject\" placeholder=\"Предмет\"></div><div class=\"field\"><input id=\"schTime\" placeholder=\"08:30–09:50\"></div><div class=\"field\"><input id=\"schTeacher\" placeholder=\"Преподаватель\"></div><div class=\"field\"><input id=\"schRoom\" placeholder=\"Кабинет\"></div><button class=\"btn\" id=\"saveSch\">Сохранить</button>');document.getElementById('saveSch').onclick=async function(){await api('/api/schedule',{method:'POST',body:JSON.stringify({weekday:Number(document.getElementById('schDay').value),lesson_no:Number(document.getElementById('schLesson').value),subject:document.getElementById('schSubject').value,time:document.getElementById('schTime').value,teacher:document.getElementById('schTeacher').value,room:document.getElementById('schRoom').value})});closeModal();toast('Расписание сохранено');go('schedule')}}}\npages.parents=async function(c){await loadStudents();var d=await api('/api/parents?month='+state.month);var rows=d.rows.map(function(x){return '<tr><td><b>'+esc(x.name)+'</b></td><td>'+x.full_days+'</td><td>'+x.absent+'</td><td>'+x.left+'</td><td>'+x.late+'</td><td>'+x.sick+'</td><td>'+x.application+'</td></tr>'}).join('');c.innerHTML='<div class=\"section-head\"><h2>👨‍👩‍👦 Для родителей</h2><div class=\"actions\"><input type=\"month\" id=\"parentMonth\" value=\"'+state.month+'\"><button class=\"btn secondary\" onclick=\"window.print()\">🖨️ Печать / PDF</button></div></div><div class=\"table-wrap\"><table class=\"table\"><thead><tr><th>Ученик</th><th>📅 День</th><th>❌ Пары</th><th>🚪</th><th>⏰</th><th>🤒</th><th>📝</th></tr></thead><tbody>'+rows+'</tbody></table></div>';document.getElementById('parentMonth').onchange=function(){state.month=this.value;go('parents')}}\npages.analytics=async function(c){var d=await api('/api/stats?month='+state.month);var max=Math.max.apply(null,d.rows.map(function(x){return x.absent+x.sick+x.application}).concat([1]));c.innerHTML='<div class=\"section-head\"><h2>📊 Аналитика</h2><div class=\"actions\"><input type=\"month\" id=\"statMonth\" value=\"'+state.month+'\"></div></div><div class=\"grid\">'+metric('Средняя посещаемость',d.group_percent+'%')+metric('❌ Пропусков',d.total_absent)+metric('🤒 Болезней',d.total_sick)+metric('📝 Заявлений',d.total_application)+'</div><div class=\"card\" style=\"margin-top:14px\"><h3>Нагрузка по ученикам</h3><div class=\"chart\">'+d.rows.map(function(x){var v=x.absent+x.sick+x.application;return '<div class=\"bar\" title=\"'+esc(x.name)+': '+v+'\" style=\"height:'+Math.max(3,Math.round(v/max*100))+'%\"></div>'}).join('')+'</div></div>';document.getElementById('statMonth').onchange=function(){state.month=this.value;go('analytics')}}\npages.reports=async function(c){c.innerHTML='<div class=\"section-head\"><h2>📄 Отчёты и резервные копии</h2></div><div class=\"grid\"><div class=\"card\"><h3>Excel</h3><p class=\"muted\">Полная посещаемость и сводка.</p><a class=\"btn\" style=\"display:inline-block;text-decoration:none\" href=\"/api/report.xlsx?period=all\">Скачать .xlsx</a></div><div class=\"card\"><h3>CSV</h3><p class=\"muted\">Универсальный экспорт данных.</p><a class=\"btn secondary\" style=\"display:inline-block;text-decoration:none\" href=\"/api/export.csv\">Скачать .csv</a></div><div class=\"card\"><h3>Backup JSON</h3><p class=\"muted\">Студенты, посещаемость, пары, дежурства.</p><a class=\"btn secondary\" style=\"display:inline-block;text-decoration:none\" href=\"/api/backup\">Скачать backup</a></div></div>'}\npages.online=async function(c){var d=await api('/api/online');c.innerHTML='<div class=\"section-head\"><h2>🟢 Кто в системе</h2></div><div class=\"list\">'+d.users.map(function(u){return '<div class=\"list-item\"><span>'+(u.online?'🟢':'⚪')+'</span><div><b>'+esc(u.display_name||u.login||u.telegram_user_id)+'</b><div class=\"small muted\">'+esc(u.last_seen||'нет активности')+'</div></div></div>'}).join('')+'</div>'}\npages.users=async function(c){\nvar d=await api('/api/admin/accounts');\nvar perms=[\n ['view_journal','👁️','Просмотр журнала','Можно смотреть журнал и данные'],\n ['edit_attendance','✏️','Посещаемость','Можно менять статусы и пары'],\n ['edit_students','🎓','Ученики','Добавление и изменение учеников'],\n ['edit_duty','🧹','Дежурство','Управление дежурными'],\n ['edit_schedule','📚','Расписание','Изменение расписания'],\n ['reports','📊','Отчёты','Статистика, экспорт и отчёты'],\n ['manage_users','👥','Пользователи','Управление доступами'],\n ['settings','⚙️','Настройки','Изменение системных настроек']\n];\nc.innerHTML='<div class=\"section-head\"><h2>👥 Пользователи и доступ</h2><div class=\"actions\"><button class=\"btn\" id=\"newAccount\">+ Создать пользователя</button></div></div>'+\n'<div class=\"card\" style=\"margin-bottom:12px\"><b>🔒 Закрытая система</b><div class=\"muted small\">Пользователей создаёт только владелец. Самостоятельной регистрации нет.</div></div>'+\n'<div class=\"list\">'+d.accounts.map(function(u){\n return '<div class=\"list-item\"><div style=\"flex:1\"><b>'+esc(u.display_name||u.login||u.telegram_user_id||'Аккаунт')+'</b>'+\n '<div class=\"small muted\">'+esc(u.login||'без логина')+' · '+esc(u.role)+' · '+(Number(u.enabled)?'активен':'отключён')+\n (u.telegram_user_id?' · TG '+esc(u.telegram_user_id):'')+'</div></div>'+\n (u.role!=='owner'?'<button class=\"btn secondary\" data-toggle=\"'+u.id+'\" data-enabled=\"'+Number(u.enabled)+'\">'+(Number(u.enabled)?'Отключить':'Включить')+'</button>':'<span class=\"pill\">👑 Владелец</span>')+\n '</div>';\n}).join('')+'</div>';\n\ndocument.getElementById('newAccount').onclick=function(){\n modal('<h3>Создать пользователя</h3>'+\n '<div class=\"field\"><label>Имя</label><input id=\"accName\" placeholder=\"Например: Классный руководитель\"></div>'+\n '<div class=\"field\"><label>Логин</label><input id=\"accLogin\" autocomplete=\"off\" placeholder=\"teacher102\"><div class=\"small muted\">От 3 символов. Можно латиницу, цифры, . _ -</div></div>'+\n '<div class=\"field\"><label>Пароль</label><div style=\"display:flex;gap:7px\"><input style=\"flex:1\" id=\"accPass\" type=\"text\" autocomplete=\"off\" placeholder=\"Минимум 8 символов\"><button type=\"button\" class=\"btn secondary\" id=\"genPass\">🎲</button></div></div>'+\n '<div class=\"field\"><label>Telegram ID — необязательно</label><input id=\"accTg\" inputmode=\"numeric\" placeholder=\"Для автовхода из Telegram\"></div>'+\n '<div class=\"field\"><label>Роль</label><select id=\"accRole\"><option value=\"teacher\">Преподаватель</option><option value=\"viewer\">Только просмотр</option></select></div>'+\n '<div><b>Права доступа</b><div class=\"small muted\" style=\"margin-top:4px\">Нажми на нужные пункты — выбранные подсвечиваются.</div><div class=\"perm-grid\">'+perms.map(function(p){var checked=['view_journal','edit_attendance','edit_duty','reports'].includes(p[0]);return '<label class=\"perm-card '+(checked?'on':'')+'\"><input type=\"checkbox\" data-perm=\"'+p[0]+'\" '+(checked?'checked':'')+'><span class=\"perm-icon\">'+p[1]+'</span><span class=\"perm-text\"><b>'+p[2]+'</b><span>'+p[3]+'</span></span></label>'}).join('')+'</div></div>'+\n '<div id=\"accError\" class=\"small\" style=\"color:#ffbe55;margin-top:10px\"></div>'+\n '<button class=\"btn\" id=\"saveAcc\" style=\"margin-top:12px;width:100%\">Создать пользователя</button>');\n\n document.querySelectorAll('.perm-card input').forEach(function(ch){\n   ch.onchange=function(){ch.closest('.perm-card').classList.toggle('on',ch.checked)}\n });\n document.getElementById('genPass').onclick=function(){\n   var chars='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';\n   var arr=new Uint32Array(14);crypto.getRandomValues(arr);\n   document.getElementById('accPass').value=Array.from(arr,function(x){return chars[x%chars.length]}).join('');\n };\n\n document.getElementById('saveAcc').onclick=async function(){\n   var btn=this, err=document.getElementById('accError');\n   err.textContent='';\n   var login=document.getElementById('accLogin').value.trim();\n   var password=document.getElementById('accPass').value;\n   var tg=document.getElementById('accTg').value.trim();\n\n   if(!/^[A-Za-z0-9_.-]{3,40}$/.test(login)){\n     err.textContent='⚠️ Логин: минимум 3 символа, латиница/цифры/._-';\n     return;\n   }\n   if(password.length<8){\n     err.textContent='⚠️ Пароль должен быть минимум 8 символов.';\n     return;\n   }\n   if(tg && !/^\\d{5,20}$/.test(tg)){\n     err.textContent='⚠️ Telegram ID должен состоять только из цифр.';\n     return;\n   }\n\n   var ps=[].slice.call(document.querySelectorAll('[data-perm]:checked')).map(function(x){return x.dataset.perm});\n   btn.disabled=true; btn.textContent='Создаю…';\n   try{\n     var r=await api('/api/admin/accounts',{\n       method:'POST',\n       body:JSON.stringify({\n         display_name:document.getElementById('accName').value.trim(),\n         login:login,password:password,telegram_user_id:tg,\n         role:document.getElementById('accRole').value,permissions:ps\n       })\n     });\n     closeModal();\n     await go('users');\n     modal('<h3>✅ Пользователь создан</h3>'+\n       '<p>Передай ему эти данные для входа через браузер:</p>'+\n       '<div class=\"card mono\" style=\"font-size:16px;line-height:1.8\">Логин: <b>'+esc(r.login)+'</b><br>Пароль: <b>'+esc(r.password)+'</b></div>'+\n       '<p class=\"small muted\">Пароль в базе хранится только в виде защищённого хеша.</p>');\n   }catch(e){\n     err.textContent='⚠️ '+e.message;\n     btn.disabled=false; btn.textContent='Создать пользователя';\n   }\n };\n};\n\ndocument.querySelectorAll('[data-toggle]').forEach(function(b){\n b.onclick=async function(){\n   try{\n     await api('/api/admin/accounts/toggle',{method:'POST',body:JSON.stringify({id:Number(b.dataset.toggle),enabled:b.dataset.enabled!=='1'})});\n     toast('Доступ изменён');go('users');\n   }catch(e){toast(e.message)}\n };\n});\n}\npages.audit=async function(c){var d=await api('/api/audit');c.innerHTML='<div class=\"section-head\"><h2>🛡 Журнал действий</h2></div><div class=\"table-wrap\"><table class=\"table\"><thead><tr><th>Время</th><th>Кто</th><th>Действие</th><th>Детали</th></tr></thead><tbody>'+d.rows.map(function(x){return '<tr><td>'+esc(x.created_at)+'</td><td>'+esc(x.actor_user_id||'system')+'</td><td>'+esc(x.action)+'</td><td>'+esc(x.details||'')+'</td></tr>'}).join('')+'</tbody></table></div>'}\npages.settings=async function(c){var d=await api('/api/settings');c.innerHTML='<div class=\"section-head\"><h2>⚙️ Настройки</h2></div><div class=\"card\"><div class=\"field\"><label>Название группы</label><input id=\"groupName\" value=\"'+esc(d.group_name||'Группа 102')+'\"></div><div class=\"field\"><label>Часовой пояс</label><input id=\"tz\" value=\"'+esc(d.timezone||'Europe/Chisinau')+'\"></div><button class=\"btn\" id=\"saveSettings\">Сохранить</button></div>';document.getElementById('saveSettings').onclick=async function(){await api('/api/settings',{method:'POST',body:JSON.stringify({group_name:document.getElementById('groupName').value,timezone:document.getElementById('tz').value})});toast('Настройки сохранены')}}\ndocument.getElementById('logout').onclick=async function(){\n  await api('/api/logout',{method:'POST',body:'{}'});\n  var tg=window.Telegram&&window.Telegram.WebApp;\n  if(tg&&tg.initData){\n    try{tg.close();return}catch(e){}\n  }\n  location.reload();\n};\ndocument.getElementById('passPane').onsubmit=async function(e){e.preventDefault();try{await api('/api/auth/password',{method:'POST',body:JSON.stringify({login:document.getElementById('login').value,password:document.getElementById('password').value})});await boot()}catch(err){document.getElementById('authMsg').textContent=err.message}};\ndocument.getElementById('globalSearch').onkeydown=async function(e){if(e.key!=='Enter')return;var q=this.value.trim();if(!q)return;var d=await api('/api/search?q='+encodeURIComponent(q));modal('<h3>🔎 Поиск</h3><div class=\"list\">'+d.results.map(function(x){return '<div class=\"list-item\"><b>'+esc(x.title)+'</b><span class=\"muted\">'+esc(x.subtitle||'')+'</span></div>'}).join('')+'</div>')};\nasync function boot(){\n  var tg=window.Telegram&&window.Telegram.WebApp;\n\n  // В Telegram всегда сначала подтверждаем initData и создаём/обновляем веб-сессию.\n  // Поэтому после выхода и нового открытия кнопки автовход снова работает.\n  if(tg&&tg.initData){\n    try{\n      tg.ready();\n      tg.expand();\n      await api('/api/auth/telegram',{\n        method:'POST',\n        body:JSON.stringify({initData:tg.initData})\n      });\n      state.me=await api('/api/me');\n      showShell();\n      return;\n    }catch(err){\n      showAuth();\n      document.getElementById('authMsg').textContent=err.message;\n      document.getElementById('tgAuto').textContent='🔒 Автовход Telegram не разрешён для этого аккаунта.';\n      return;\n    }\n  }\n\n  // Обычный браузер: используем сохранённую cookie-сессию, иначе показываем логин/пароль.\n  try{\n    state.me=await api('/api/me');\n    showShell();\n  }catch(e){\n    showAuth();\n    document.getElementById('tgAuto').textContent='Прямой вход: используйте логин и пароль.';\n  }\n}\nboot();\n})();\n</script>\n</body>\n</html>";
+const WEB_APP_HTML = "<!doctype html>\n<html lang=\"ru\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">\n<meta name=\"theme-color\" content=\"#10131a\">\n<title>Журнал группы 102</title>\n<style>\n:root{--bg:#0d1016;--panel:#151a23;--panel2:#1c2330;--text:#f5f7fb;--muted:#9da9bb;--line:#2a3445;--accent:#5b8cff;--good:#39c98a;--bad:#ff5d69;--warn:#ffbe55;--radius:18px}\n*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}\nbutton,input,select,textarea{font:inherit}.hidden{display:none!important}.muted{color:var(--muted)}.small{font-size:12px}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}\n#auth{min-height:100vh;display:grid;place-items:center;padding:22px}.auth-card{width:min(440px,100%);background:var(--panel);border:1px solid var(--line);border-radius:26px;padding:24px;box-shadow:0 24px 70px #0008}.brand{display:flex;gap:14px;align-items:center;margin-bottom:22px}.logo{width:58px;height:58px;border-radius:16px;background:linear-gradient(135deg,#315fe9,#71a1ff);display:grid;place-items:center;font-size:30px}.auth-tabs{display:flex;background:var(--panel2);border-radius:14px;padding:4px;margin:16px 0}.auth-tabs button{flex:1;border:0;background:none;color:var(--muted);padding:10px;border-radius:10px}.auth-tabs button.on{background:#2a3445;color:#fff}.field{display:flex;flex-direction:column;gap:7px;margin:12px 0}.field input,.field select,.field textarea{background:#0f141d;color:#fff;border:1px solid var(--line);border-radius:12px;padding:12px}.btn{border:0;border-radius:12px;padding:11px 15px;background:var(--accent);color:#fff;font-weight:700;cursor:pointer}.btn.secondary{background:var(--panel2);border:1px solid var(--line)}.btn.danger{background:#5b2228}.btn.ghost{background:transparent;border:1px solid var(--line)}.btn:disabled{opacity:.45}.code{font-size:38px;letter-spacing:8px;text-align:center;font-weight:900;margin:14px 0}\n#shell{min-height:100vh}.sidebar{position:fixed;inset:0 auto 0 0;width:260px;background:#10151e;border-right:1px solid var(--line);padding:18px 12px;overflow:auto;z-index:20}.side-brand{padding:8px 10px 18px;font-size:20px;font-weight:900}.navbtn{width:100%;display:flex;gap:10px;align-items:center;border:0;background:transparent;color:#c3ccda;padding:11px 12px;border-radius:12px;text-align:left;cursor:pointer;margin:2px 0}.navbtn.on,.navbtn:hover{background:var(--panel2);color:#fff}.main{margin-left:260px;min-height:100vh}.topbar{height:68px;position:sticky;top:0;z-index:10;background:#0d1016e8;backdrop-filter:blur(12px);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;padding:0 22px}.topbar h1{font-size:20px;margin:0}.spacer{flex:1}.search{max-width:320px;width:35%;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:9px 12px;color:#fff}.content{padding:22px;max-width:1500px;margin:auto}.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px}.metric{font-size:30px;font-weight:900;margin-top:8px}.section-head{display:flex;align-items:center;gap:10px;margin-bottom:14px}.section-head h2{margin:0;font-size:21px}.section-head .actions{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:14px}.table{width:100%;border-collapse:collapse;min-width:680px}.table th,.table td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left}.table th{color:var(--muted);font-size:12px;text-transform:uppercase;position:sticky;top:0;background:var(--panel)}.statusbtn{border:1px solid var(--line);background:#0f141d;color:#fff;border-radius:10px;padding:7px 10px;cursor:pointer;white-space:nowrap}.student{display:flex;align-items:center;gap:10px}.avatar{width:34px;height:34px;border-radius:10px;background:#26334a;display:grid;place-items:center;font-weight:800}.pill{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:4px 8px;font-size:12px}.list{display:flex;flex-direction:column;gap:8px}.list-item{display:flex;align-items:center;gap:10px;padding:11px;background:var(--panel2);border-radius:12px}.modal-bg{position:fixed;inset:0;background:#0009;z-index:50;display:grid;place-items:center;padding:18px}.modal{width:min(650px,100%);max-height:90vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:18px}.modal h3{margin-top:0}.status-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.status-grid button{padding:14px 8px}.tabs{display:flex;gap:6px;overflow:auto;margin-bottom:12px}.tabs button{white-space:nowrap}.calendar{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}.day{min-height:90px;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:8px}.day strong{display:block}.chart{display:flex;align-items:end;gap:5px;height:160px;border-bottom:1px solid var(--line);padding:8px}.bar{flex:1;background:var(--accent);min-width:10px;border-radius:6px 6px 0 0;opacity:.85}.toast{position:fixed;right:18px;bottom:18px;background:#202939;border:1px solid var(--line);padding:12px 16px;border-radius:12px;z-index:80}.mobile-nav{display:none}\n@media(max-width:1000px){.grid{grid-template-columns:repeat(2,1fr)}.sidebar{width:220px}.main{margin-left:220px}}\n@media(max-width:760px){.sidebar{display:none}.main{margin:0}.topbar{height:58px;padding:0 12px}.topbar .search{display:none}.content{padding:12px 12px 86px}.grid{grid-template-columns:1fr 1fr;gap:9px}.card{padding:13px;border-radius:15px}.metric{font-size:25px}.mobile-nav{display:flex;position:fixed;bottom:0;left:0;right:0;background:#10151ef3;border-top:1px solid var(--line);z-index:30;padding:7px 6px max(7px,env(safe-area-inset-bottom));justify-content:space-around}.mobile-nav button{border:0;background:none;color:#aab4c4;font-size:11px;min-width:54px;flex:1;padding:4px 2px}.mobile-nav button b{display:block;font-size:21px}.mobile-nav button.on{color:#fff}.section-head{align-items:flex-start}.section-head .actions{flex-direction:column}.calendar{gap:4px}.day{min-height:72px;padding:5px;font-size:11px}.status-grid{grid-template-columns:1fr 1fr}}\n\n.perm-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:10px}\n.perm-card{display:flex;align-items:center;gap:10px;padding:12px;border:1px solid var(--line);border-radius:14px;background:var(--panel2);cursor:pointer;user-select:none}\n.perm-card.on{border-color:#5b8cff;background:#1e2b44}\n.perm-card input{display:none}\n.perm-icon{font-size:22px;width:28px;text-align:center}\n.perm-text{display:flex;flex-direction:column;gap:2px}\n.perm-text b{font-size:14px}\n.perm-text span{font-size:11px;color:var(--muted)}\n@media(max-width:760px){.perm-grid{grid-template-columns:1fr}}\n\n</style>\n<script src=\"https://telegram.org/js/telegram-web-app.js\"></script>\n</head>\n<body>\n<div id=\"auth\">\n  <div class=\"auth-card\">\n    <div class=\"brand\"><div class=\"logo\">📚</div><div><h2 style=\"margin:0\">Журнал группы 102</h2><div class=\"muted\">Закрытая система преподавателя</div></div></div>\n    <div id=\"tgAuto\" class=\"muted small\">Из Telegram вход выполняется автоматически. При прямом открытии сайта — только логин и пароль.</div>\n    <form id=\"passPane\">\n      <div class=\"field\"><label>Логин</label><input id=\"login\" autocomplete=\"username\"></div>\n      <div class=\"field\"><label>Пароль</label><input id=\"password\" type=\"password\" autocomplete=\"current-password\"></div>\n      <button class=\"btn\" style=\"width:100%\">Войти</button>\n    </form>\n    <div class=\"small muted\" style=\"margin-top:12px\">🔒 Самостоятельной регистрации нет. Доступ создаёт владелец.</div>\n    <div id=\"authMsg\" class=\"small\" style=\"margin-top:12px;color:#ffbe55\"></div>\n  </div>\n</div>\n\n<div id=\"shell\" class=\"hidden\">\n  <aside class=\"sidebar\">\n    <div class=\"side-brand\">📚 Журнал 102</div>\n    <div id=\"sideNav\"></div>\n  </aside>\n  <main class=\"main\">\n    <div class=\"topbar\"><h1 id=\"pageTitle\">Главная</h1><div class=\"spacer\"></div><input class=\"search\" id=\"globalSearch\" placeholder=\"🔎 Поиск\"><button class=\"btn secondary\" id=\"logout\">Выйти</button></div>\n    <div class=\"content\" id=\"content\"></div>\n  </main>\n  <div class=\"mobile-nav\" id=\"mobileNav\"></div>\n</div>\n<div id=\"modalRoot\"></div>\n<script>\n(function(){\nvar state={me:null,page:'dashboard',students:[],date:new Date().toISOString().slice(0,10),month:new Date().toISOString().slice(0,7)};\nvar nav=[\n ['dashboard','🏠','Главная'],['journal','👥','Журнал'],['pairs','📚','По парам'],['students','👤','Студенты'],\n ['calendar','📅','Календарь'],['health','🤒','Болезни и заявления'],['duty','🧹','Дежурство'],\n ['schedule','🗓️','Расписание'],['parents','👨‍👩‍👦','Родителям'],['analytics','📊','Аналитика'],\n ['reports','📄','Отчёты'],['online','🟢','Онлайн'],['users','👥','Пользователи'],\n ['audit','🛡','Журнал действий'],['settings','⚙️','Настройки']\n];\nvar statusOrder=['none','present','absent','late','sick','application','left'];\nvar statusMeta={none:['➖','Не отмечено'],present:['✅','Присутствует'],absent:['❌','Отсутствует'],late:['⏰','Опоздал'],sick:['🤒','Болеет'],application:['📝','По заявлению'],left:['🚪','Ушёл раньше'],excused:['🤒','Болеет']};\nfunction esc(x){return String(x==null?'':x).replace(/[&<>\"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]})}\nasync function api(path,opt){opt=opt||{};opt.headers=Object.assign({'content-type':'application/json'},opt.headers||{});var r=await fetch(path,opt);var ct=r.headers.get('content-type')||'';if(r.status===401){showAuth();throw new Error('Нужен вход')}if(!r.ok){var e=ct.includes('json')?await r.json():{error:await r.text()};throw new Error(e.error||'Ошибка')}return ct.includes('json')?r.json():r}\nfunction toast(t){var d=document.createElement('div');d.className='toast';d.textContent=t;document.body.appendChild(d);setTimeout(function(){d.remove()},2200)}\nfunction fmtDate(d){try{return new Date(d+'T12:00:00').toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'})}catch(e){return d}}\nfunction showAuth(){document.getElementById('auth').classList.remove('hidden');document.getElementById('shell').classList.add('hidden')}\nfunction showShell(){document.getElementById('auth').classList.add('hidden');document.getElementById('shell').classList.remove('hidden');renderNav();go('dashboard')}\nfunction renderNav(){var html='';nav.forEach(function(n){if((n[0]==='users'||n[0]==='audit'||n[0]==='settings')&&state.me.role!=='owner')return;html+='<button class=\"navbtn '+(state.page===n[0]?'on':'')+'\" data-p=\"'+n[0]+'\"><span>'+n[1]+'</span>'+n[2]+'</button>'});document.getElementById('sideNav').innerHTML=html;document.querySelectorAll('.navbtn').forEach(function(b){b.onclick=function(){go(b.dataset.p)}});var mobileMain=nav.filter(function(n){return ['dashboard','journal','pairs','students'].includes(n[0])}).map(function(n){return '<button data-p=\"'+n[0]+'\" class=\"'+(state.page===n[0]?'on':'')+'\"><b>'+n[1]+'</b>'+n[2]+'</button>'}).join('');\nvar moreActive=['calendar','health','duty','schedule','parents','analytics','reports','online','users','audit','settings'].includes(state.page);\nmobileMain+='<button id=\"mobileMore\" class=\"'+(moreActive?'on':'')+'\"><b>☰</b>Ещё</button>';\ndocument.getElementById('mobileNav').innerHTML=mobileMain;\ndocument.querySelectorAll('#mobileNav [data-p]').forEach(function(b){b.onclick=function(){go(b.dataset.p)}});\nvar mb=document.getElementById('mobileMore');if(mb)mb.onclick=openMoreMenu}\nasync function go(p){state.page=p;renderNav();var n=nav.find(function(x){return x[0]===p});document.getElementById('pageTitle').textContent=n?n[2]:'';var c=document.getElementById('content');c.innerHTML='<div class=\"card\">Загрузка…</div>';try{var fn=pages[p]||pages.dashboard;await fn(c)}catch(e){c.innerHTML='<div class=\"card\">⚠️ '+esc(e.message)+'</div>'}}\nfunction metric(label,val,sub){return '<div class=\"card\"><div class=\"muted\">'+label+'</div><div class=\"metric\">'+val+'</div><div class=\"small muted\">'+(sub||'')+'</div></div>'}\nasync function loadStudents(){state.students=(await api('/api/students')).students;return state.students}\nfunction studentName(id){var s=state.students.find(function(x){return Number(x.id)===Number(id)});return s?s.name:'#'+id}\nfunction statusButton(st,id,kind,date,lesson){var m=statusMeta[st]||statusMeta.none;return '<button class=\"statusbtn\" data-kind=\"'+kind+'\" data-id=\"'+id+'\" data-status=\"'+st+'\" data-date=\"'+date+'\" '+(lesson?'data-lesson=\"'+lesson+'\"':'')+'>'+m[0]+' '+m[1]+'</button>'}\nfunction bindStatusButtons(){document.querySelectorAll('.statusbtn').forEach(function(b){b.onclick=function(){openStatus(b.dataset.kind,b.dataset.id,b.dataset.date,b.dataset.lesson)}})}\nfunction openStatus(kind,id,date,lesson){var buttons=statusOrder.map(function(st){var m=statusMeta[st];return '<button class=\"btn secondary\" data-st=\"'+st+'\">'+m[0]+' '+m[1]+'</button>'}).join('');modal('<h3>'+esc(studentName(id))+'</h3><div class=\"status-grid\">'+buttons+'</div>');document.querySelectorAll('#modalRoot [data-st]').forEach(function(b){b.onclick=async function(){await api(kind==='pair'?'/api/pairs':'/api/attendance',{method:'POST',body:JSON.stringify({student_id:Number(id),date:date,lesson_no:lesson?Number(lesson):undefined,status:b.dataset.st})});closeModal();toast('Сохранено');go(state.page)}})}\nfunction modal(html){document.getElementById('modalRoot').innerHTML='<div class=\"modal-bg\"><div class=\"modal\">'+html+'<div style=\"margin-top:14px\"><button class=\"btn ghost\" id=\"closeModal\">Закрыть</button></div></div></div>';document.getElementById('closeModal').onclick=closeModal}\nfunction closeModal(){document.getElementById('modalRoot').innerHTML=''}\n\n\nfunction openMoreMenu(){\n  var allowed=nav.filter(function(n){\n    if(['dashboard','journal','pairs','students'].includes(n[0])) return false;\n    if((n[0]==='users'||n[0]==='audit'||n[0]==='settings')&&state.me.role!=='owner') return false;\n    return true;\n  });\n  modal('<h3>☰ Ещё</h3><div class=\"list\">'+allowed.map(function(n){\n    return '<button class=\"list-item\" style=\"width:100%;border:0;color:inherit;text-align:left;cursor:pointer\" data-more=\"'+n[0]+'\"><span style=\"font-size:22px\">'+n[1]+'</span><b>'+n[2]+'</b></button>';\n  }).join('')+'</div>');\n  document.querySelectorAll('[data-more]').forEach(function(b){b.onclick=function(){var p=b.dataset.more;closeModal();go(p)}});\n}\nvar pages={};\npages.dashboard=async function(c){var d=await api('/api/dashboard');c.innerHTML='<div class=\"grid\">'+metric('👥 Учеников',d.students)+metric('❌ Нет сегодня',d.absent)+metric('🤒 Болеют',d.sick)+metric('📝 По заявлению',d.application)+'</div><div class=\"grid\" style=\"margin-top:14px;grid-template-columns:2fr 1fr\"><div class=\"card\"><div class=\"section-head\"><h2>Сегодня</h2></div><div class=\"list\">'+(d.today.map(function(x){return '<div class=\"list-item\"><div>'+x.icon+'</div><div><b>'+esc(x.name)+'</b><div class=\"muted small\">'+esc(x.text)+'</div></div></div>'}).join('')||'<div class=\"muted\">Событий нет</div>')+'</div></div><div class=\"card\"><h2 style=\"margin-top:0\">🧹 Дежурные</h2><div>'+((d.duty||[]).map(function(x){return '<div class=\"pill\" style=\"margin:3px\">'+esc(x.name)+'</div>'}).join('')||'<span class=\"muted\">Не назначены</span>')+'</div></div></div>'}\npages.journal=async function(c){await loadStudents();var d=await api('/api/attendance?date='+state.date);var rows=state.students.map(function(s){var st=d.statuses[String(s.id)]||'none';return '<tr><td><div class=\"student\"><div class=\"avatar\">'+esc(s.name[0])+'</div><b>'+esc(s.name)+'</b></div></td><td>'+statusButton(st,s.id,'day',state.date)+'</td></tr>'}).join('');c.innerHTML='<div class=\"section-head\"><h2>👥 Посещаемость</h2><div class=\"actions\"><input type=\"date\" id=\"journalDate\" value=\"'+state.date+'\"><button class=\"btn secondary\" id=\"allPresent\">✅ Все есть</button></div></div><div class=\"table-wrap\"><table class=\"table\"><thead><tr><th>Ученик</th><th>Статус</th></tr></thead><tbody>'+rows+'</tbody></table></div>';document.getElementById('journalDate').onchange=function(){state.date=this.value;go('journal')};document.getElementById('allPresent').onclick=async function(){await api('/api/attendance/all-present',{method:'POST',body:JSON.stringify({date:state.date})});toast('Все отмечены');go('journal')};bindStatusButtons()}\npages.pairs=async function(c){await loadStudents();var d=await api('/api/pairs?date='+state.date);var lessons=d.lessons||4;var head='<th>Ученик</th>';for(var l=1;l<=lessons;l++)head+='<th>'+l+' пара</th>';var rows=state.students.map(function(s){var t='<tr><td><b>'+esc(s.name)+'</b></td>';for(var l=1;l<=lessons;l++){var st=(d.statuses[String(l)]||{})[String(s.id)]||'none';t+='<td>'+statusButton(st,s.id,'pair',state.date,l)+'</td>'}return t+'</tr>'}).join('');c.innerHTML='<div class=\"section-head\"><h2>📚 По парам</h2><div class=\"actions\"><input type=\"date\" id=\"pairDate\" value=\"'+state.date+'\"></div></div><div class=\"table-wrap\"><table class=\"table\"><thead><tr>'+head+'</tr></thead><tbody>'+rows+'</tbody></table></div>';document.getElementById('pairDate').onchange=function(){state.date=this.value;go('pairs')};bindStatusButtons()}\npages.students=async function(c){await loadStudents();c.innerHTML='<div class=\"section-head\"><h2>👤 Студенты</h2><div class=\"actions\"><button class=\"btn\" id=\"addStudent\">+ Добавить</button></div></div><div class=\"list\">'+state.students.map(function(s){return '<div class=\"list-item\"><div class=\"avatar\">'+esc(s.name[0])+'</div><div style=\"flex:1\"><b>'+esc(s.name)+'</b></div><button class=\"btn secondary\" data-card=\"'+s.id+'\">Карточка</button></div>'}).join('')+'</div>';document.getElementById('addStudent').onclick=function(){modal('<h3>Новый ученик</h3><div class=\"field\"><input id=\"newStudent\" placeholder=\"Фамилия Имя\"></div><button class=\"btn\" id=\"saveStudent\">Добавить</button>');document.getElementById('saveStudent').onclick=async function(){await api('/api/students',{method:'POST',body:JSON.stringify({name:document.getElementById('newStudent').value})});closeModal();toast('Добавлен');go('students')}};document.querySelectorAll('[data-card]').forEach(function(b){b.onclick=async function(){var d=await api('/api/student/'+b.dataset.card);modal('<h3>'+esc(d.student.name)+'</h3><div class=\"grid\">'+metric('Посещаемость',d.attendance_percent+'%')+metric('❌ Пропуски',d.absent)+metric('🤒 Болеет',d.sick)+metric('📝 Заявления',d.application)+'</div><h3>Последние события</h3><div class=\"list\">'+d.events.map(function(e){var sm=statusMeta[e.status]||['',''];var label=e.summary_label||((sm[0]+' '+sm[1]).trim());return '<div class=\"list-item\"><b>'+esc(e.date)+'</b><div class=\"small muted\">'+esc(label)+'</div></div>'}).join('')+'</div>')}})}\npages.calendar=async function(c){var d=await api('/api/calendar?month='+state.month);var first=new Date(state.month+'-01T12:00:00'),start=(first.getDay()+6)%7,days=new Date(first.getFullYear(),first.getMonth()+1,0).getDate(),cells='';for(var i=0;i<start;i++)cells+='<div></div>';for(var x=1;x<=days;x++){var ds=state.month+'-'+String(x).padStart(2,'0'),q=d.days[ds]||{};cells+='<div class=\"day\"><strong>'+x+'</strong><div>❌ '+(q.absent||0)+'</div><div>🤒 '+(q.sick||0)+' · 📝 '+(q.application||0)+'</div><div>↔️ '+(q.partial||0)+' частично</div></div>'}c.innerHTML='<div class=\"section-head\"><h2>📅 Календарь</h2><div class=\"actions\"><input type=\"month\" id=\"calMonth\" value=\"'+state.month+'\"></div></div><div class=\"calendar\">'+cells+'</div>';document.getElementById('calMonth').onchange=function(){state.month=this.value;go('calendar')}}\npages.health=async function(c){var d=await api('/api/health?month='+state.month);c.innerHTML='<div class=\"section-head\"><h2>🤒 Болезни и заявления</h2><div class=\"actions\"><input type=\"month\" id=\"healthMonth\" value=\"'+state.month+'\"></div></div><div class=\"grid\">'+metric('🤒 Болезни',d.sick_total)+metric('📝 Заявления',d.application_total)+'</div><div class=\"card\" style=\"margin-top:14px\"><div class=\"list\">'+d.rows.map(function(x){return '<div class=\"list-item\"><b style=\"flex:1\">'+esc(x.name)+'</b><span class=\"pill\">🤒 '+x.sick+'</span><span class=\"pill\">📝 '+x.application+'</span></div>'}).join('')+'</div></div>';document.getElementById('healthMonth').onchange=function(){state.month=this.value;go('health')}}\npages.duty=async function(c){await loadStudents();var d=await api('/api/duty?date='+state.date);var chosen=new Set((d.students||[]).map(function(x){return Number(x.id)}));c.innerHTML='<div class=\"section-head\"><h2>🧹 Дежурство</h2><div class=\"actions\"><input type=\"date\" id=\"dutyDate\" value=\"'+state.date+'\"></div></div><div class=\"card\"><div class=\"list\">'+state.students.map(function(s){return '<label class=\"list-item\"><input type=\"checkbox\" data-duty=\"'+s.id+'\" '+(chosen.has(Number(s.id))?'checked':'')+'><span>'+esc(s.name)+'</span></label>'}).join('')+'</div><button class=\"btn\" id=\"saveDuty\" style=\"margin-top:12px\">Сохранить</button></div>';document.getElementById('dutyDate').onchange=function(){state.date=this.value;go('duty')};document.getElementById('saveDuty').onclick=async function(){var ids=[].slice.call(document.querySelectorAll('[data-duty]:checked')).map(function(x){return Number(x.dataset.duty)});await api('/api/duty',{method:'POST',body:JSON.stringify({date:state.date,student_ids:ids})});toast('Сохранено')}}\npages.schedule=async function(c){var d=await api('/api/schedule');var days=['Понедельник','Вторник','Среда','Четверг','Пятница'];c.innerHTML='<div class=\"section-head\"><h2>🗓️ Расписание</h2><div class=\"actions\">'+(state.me.role==='owner'?'<button class=\"btn\" id=\"editSchedule\">Редактировать</button>':'')+'</div></div>'+days.map(function(day,i){var arr=d.days[String(i+1)]||[];return '<div class=\"card\" style=\"margin-bottom:10px\"><b>'+day+'</b><div class=\"list\" style=\"margin-top:10px\">'+arr.map(function(x){return '<div class=\"list-item\"><span class=\"pill\">'+x.lesson_no+'</span><div><b>'+esc(x.subject)+'</b><div class=\"small muted\">'+esc(x.time||'')+(x.teacher?' · '+esc(x.teacher):'')+(x.room?' · каб. '+esc(x.room):'')+'</div></div></div>'}).join('')+'</div></div>'}).join('');var eb=document.getElementById('editSchedule');if(eb)eb.onclick=function(){modal('<h3>Редактирование расписания</h3><p class=\"muted\">В этой версии расписание редактируется через таблицу: выберите день и пару, затем сохраните.</p><div class=\"field\"><select id=\"schDay\">'+days.map(function(x,i){return '<option value=\"'+(i+1)+'\">'+x+'</option>'}).join('')+'</select></div><div class=\"field\"><input id=\"schLesson\" type=\"number\" min=\"1\" max=\"8\" placeholder=\"Номер пары\"></div><div class=\"field\"><input id=\"schSubject\" placeholder=\"Предмет\"></div><div class=\"field\"><input id=\"schTime\" placeholder=\"08:30–09:50\"></div><div class=\"field\"><input id=\"schTeacher\" placeholder=\"Преподаватель\"></div><div class=\"field\"><input id=\"schRoom\" placeholder=\"Кабинет\"></div><button class=\"btn\" id=\"saveSch\">Сохранить</button>');document.getElementById('saveSch').onclick=async function(){await api('/api/schedule',{method:'POST',body:JSON.stringify({weekday:Number(document.getElementById('schDay').value),lesson_no:Number(document.getElementById('schLesson').value),subject:document.getElementById('schSubject').value,time:document.getElementById('schTime').value,teacher:document.getElementById('schTeacher').value,room:document.getElementById('schRoom').value})});closeModal();toast('Расписание сохранено');go('schedule')}}}\npages.parents=async function(c){await loadStudents();var d=await api('/api/parents?month='+state.month);var rows=d.rows.map(function(x){return '<tr><td><b>'+esc(x.name)+'</b></td><td>'+x.full_days+'</td><td>'+x.absent+'</td><td>'+x.left+'</td><td>'+x.late+'</td><td>'+x.sick+'</td><td>'+x.application+'</td></tr>'}).join('');c.innerHTML='<div class=\"section-head\"><h2>👨‍👩‍👦 Для родителей</h2><div class=\"actions\"><input type=\"month\" id=\"parentMonth\" value=\"'+state.month+'\"><button class=\"btn secondary\" onclick=\"window.print()\">🖨️ Печать / PDF</button></div></div><div class=\"table-wrap\"><table class=\"table\"><thead><tr><th>Ученик</th><th>📅 День</th><th>❌ Пары</th><th>🚪</th><th>⏰</th><th>🤒</th><th>📝</th></tr></thead><tbody>'+rows+'</tbody></table></div>';document.getElementById('parentMonth').onchange=function(){state.month=this.value;go('parents')}}\npages.analytics=async function(c){var d=await api('/api/stats?month='+state.month);var max=Math.max.apply(null,d.rows.map(function(x){return x.absent+x.sick+x.application}).concat([1]));c.innerHTML='<div class=\"section-head\"><h2>📊 Аналитика</h2><div class=\"actions\"><input type=\"month\" id=\"statMonth\" value=\"'+state.month+'\"></div></div><div class=\"grid\">'+metric('Средняя посещаемость',d.group_percent+'%')+metric('❌ Пропусков',d.total_absent)+metric('🤒 Болезней',d.total_sick)+metric('📝 Заявлений',d.total_application)+metric('↔️ Частичных дней',d.total_partial||0)+'</div><div class=\"card\" style=\"margin-top:14px\"><h3>Нагрузка по ученикам</h3><div class=\"chart\">'+d.rows.map(function(x){var v=x.absent+x.sick+x.application;return '<div class=\"bar\" title=\"'+esc(x.name)+': '+v+'\" style=\"height:'+Math.max(3,Math.round(v/max*100))+'%\"></div>'}).join('')+'</div></div>';document.getElementById('statMonth').onchange=function(){state.month=this.value;go('analytics')}}\npages.reports=async function(c){c.innerHTML='<div class=\"section-head\"><h2>📄 Отчёты и резервные копии</h2></div><div class=\"grid\"><div class=\"card\"><h3>Excel</h3><p class=\"muted\">Полная посещаемость и сводка.</p><a class=\"btn\" style=\"display:inline-block;text-decoration:none\" href=\"/api/report.xlsx?period=all\">Скачать .xlsx</a></div><div class=\"card\"><h3>CSV</h3><p class=\"muted\">Универсальный экспорт данных.</p><a class=\"btn secondary\" style=\"display:inline-block;text-decoration:none\" href=\"/api/export.csv\">Скачать .csv</a></div><div class=\"card\"><h3>Backup JSON</h3><p class=\"muted\">Студенты, посещаемость, пары, дежурства.</p><a class=\"btn secondary\" style=\"display:inline-block;text-decoration:none\" href=\"/api/backup\">Скачать backup</a></div></div>'}\npages.online=async function(c){var d=await api('/api/online');c.innerHTML='<div class=\"section-head\"><h2>🟢 Кто в системе</h2></div><div class=\"list\">'+d.users.map(function(u){return '<div class=\"list-item\"><span>'+(u.online?'🟢':'⚪')+'</span><div><b>'+esc(u.display_name||u.login||u.telegram_user_id)+'</b><div class=\"small muted\">'+esc(u.last_seen||'нет активности')+'</div></div></div>'}).join('')+'</div>'}\npages.users=async function(c){\nvar d=await api('/api/admin/accounts');\nvar perms=[\n ['view_journal','👁️','Просмотр журнала','Можно смотреть журнал и данные'],\n ['edit_attendance','✏️','Посещаемость','Можно менять статусы и пары'],\n ['edit_students','🎓','Ученики','Добавление и изменение учеников'],\n ['edit_duty','🧹','Дежурство','Управление дежурными'],\n ['edit_schedule','📚','Расписание','Изменение расписания'],\n ['reports','📊','Отчёты','Статистика, экспорт и отчёты'],\n ['manage_users','👥','Пользователи','Управление доступами'],\n ['settings','⚙️','Настройки','Изменение системных настроек']\n];\nc.innerHTML='<div class=\"section-head\"><h2>👥 Пользователи и доступ</h2><div class=\"actions\"><button class=\"btn\" id=\"newAccount\">+ Создать пользователя</button></div></div>'+\n'<div class=\"card\" style=\"margin-bottom:12px\"><b>🔒 Закрытая система</b><div class=\"muted small\">Пользователей создаёт только владелец. Самостоятельной регистрации нет.</div></div>'+\n'<div class=\"list\">'+d.accounts.map(function(u){\n return '<div class=\"list-item\"><div style=\"flex:1\"><b>'+esc(u.display_name||u.login||u.telegram_user_id||'Аккаунт')+'</b>'+\n '<div class=\"small muted\">'+esc(u.login||'без логина')+' · '+esc(u.role)+' · '+(Number(u.enabled)?'активен':'отключён')+\n (u.telegram_user_id?' · TG '+esc(u.telegram_user_id):'')+'</div></div>'+\n (u.role!=='owner'?'<button class=\"btn secondary\" data-toggle=\"'+u.id+'\" data-enabled=\"'+Number(u.enabled)+'\">'+(Number(u.enabled)?'Отключить':'Включить')+'</button>':'<span class=\"pill\">👑 Владелец</span>')+\n '</div>';\n}).join('')+'</div>';\n\ndocument.getElementById('newAccount').onclick=function(){\n modal('<h3>Создать пользователя</h3>'+\n '<div class=\"field\"><label>Имя</label><input id=\"accName\" placeholder=\"Например: Классный руководитель\"></div>'+\n '<div class=\"field\"><label>Логин</label><input id=\"accLogin\" autocomplete=\"off\" placeholder=\"teacher102\"><div class=\"small muted\">От 3 символов. Можно латиницу, цифры, . _ -</div></div>'+\n '<div class=\"field\"><label>Пароль</label><div style=\"display:flex;gap:7px\"><input style=\"flex:1\" id=\"accPass\" type=\"text\" autocomplete=\"off\" placeholder=\"Минимум 8 символов\"><button type=\"button\" class=\"btn secondary\" id=\"genPass\">🎲</button></div></div>'+\n '<div class=\"field\"><label>Telegram ID — необязательно</label><input id=\"accTg\" inputmode=\"numeric\" placeholder=\"Для автовхода из Telegram\"></div>'+\n '<div class=\"field\"><label>Роль</label><select id=\"accRole\"><option value=\"teacher\">Преподаватель</option><option value=\"viewer\">Только просмотр</option></select></div>'+\n '<div><b>Права доступа</b><div class=\"small muted\" style=\"margin-top:4px\">Нажми на нужные пункты — выбранные подсвечиваются.</div><div class=\"perm-grid\">'+perms.map(function(p){var checked=['view_journal','edit_attendance','edit_duty','reports'].includes(p[0]);return '<label class=\"perm-card '+(checked?'on':'')+'\"><input type=\"checkbox\" data-perm=\"'+p[0]+'\" '+(checked?'checked':'')+'><span class=\"perm-icon\">'+p[1]+'</span><span class=\"perm-text\"><b>'+p[2]+'</b><span>'+p[3]+'</span></span></label>'}).join('')+'</div></div>'+\n '<div id=\"accError\" class=\"small\" style=\"color:#ffbe55;margin-top:10px\"></div>'+\n '<button class=\"btn\" id=\"saveAcc\" style=\"margin-top:12px;width:100%\">Создать пользователя</button>');\n\n document.querySelectorAll('.perm-card input').forEach(function(ch){\n   ch.onchange=function(){ch.closest('.perm-card').classList.toggle('on',ch.checked)}\n });\n document.getElementById('genPass').onclick=function(){\n   var chars='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%';\n   var arr=new Uint32Array(14);crypto.getRandomValues(arr);\n   document.getElementById('accPass').value=Array.from(arr,function(x){return chars[x%chars.length]}).join('');\n };\n\n document.getElementById('saveAcc').onclick=async function(){\n   var btn=this, err=document.getElementById('accError');\n   err.textContent='';\n   var login=document.getElementById('accLogin').value.trim();\n   var password=document.getElementById('accPass').value;\n   var tg=document.getElementById('accTg').value.trim();\n\n   if(!/^[A-Za-z0-9_.-]{3,40}$/.test(login)){\n     err.textContent='⚠️ Логин: минимум 3 символа, латиница/цифры/._-';\n     return;\n   }\n   if(password.length<8){\n     err.textContent='⚠️ Пароль должен быть минимум 8 символов.';\n     return;\n   }\n   if(tg && !/^\\d{5,20}$/.test(tg)){\n     err.textContent='⚠️ Telegram ID должен состоять только из цифр.';\n     return;\n   }\n\n   var ps=[].slice.call(document.querySelectorAll('[data-perm]:checked')).map(function(x){return x.dataset.perm});\n   btn.disabled=true; btn.textContent='Создаю…';\n   try{\n     var r=await api('/api/admin/accounts',{\n       method:'POST',\n       body:JSON.stringify({\n         display_name:document.getElementById('accName').value.trim(),\n         login:login,password:password,telegram_user_id:tg,\n         role:document.getElementById('accRole').value,permissions:ps\n       })\n     });\n     closeModal();\n     await go('users');\n     modal('<h3>✅ Пользователь создан</h3>'+\n       '<p>Передай ему эти данные для входа через браузер:</p>'+\n       '<div class=\"card mono\" style=\"font-size:16px;line-height:1.8\">Логин: <b>'+esc(r.login)+'</b><br>Пароль: <b>'+esc(r.password)+'</b></div>'+\n       '<p class=\"small muted\">Пароль в базе хранится только в виде защищённого хеша.</p>');\n   }catch(e){\n     err.textContent='⚠️ '+e.message;\n     btn.disabled=false; btn.textContent='Создать пользователя';\n   }\n };\n};\n\ndocument.querySelectorAll('[data-toggle]').forEach(function(b){\n b.onclick=async function(){\n   try{\n     await api('/api/admin/accounts/toggle',{method:'POST',body:JSON.stringify({id:Number(b.dataset.toggle),enabled:b.dataset.enabled!=='1'})});\n     toast('Доступ изменён');go('users');\n   }catch(e){toast(e.message)}\n };\n});\n}\npages.audit=async function(c){var d=await api('/api/audit');c.innerHTML='<div class=\"section-head\"><h2>🛡 Журнал действий</h2></div><div class=\"table-wrap\"><table class=\"table\"><thead><tr><th>Время</th><th>Кто</th><th>Действие</th><th>Детали</th></tr></thead><tbody>'+d.rows.map(function(x){return '<tr><td>'+esc(x.created_at)+'</td><td>'+esc(x.actor_user_id||'system')+'</td><td>'+esc(x.action)+'</td><td>'+esc(x.details||'')+'</td></tr>'}).join('')+'</tbody></table></div>'}\npages.settings=async function(c){var d=await api('/api/settings');c.innerHTML='<div class=\"section-head\"><h2>⚙️ Настройки</h2></div><div class=\"card\"><div class=\"field\"><label>Название группы</label><input id=\"groupName\" value=\"'+esc(d.group_name||'Группа 102')+'\"></div><div class=\"field\"><label>Часовой пояс</label><input id=\"tz\" value=\"'+esc(d.timezone||'Europe/Chisinau')+'\"></div><button class=\"btn\" id=\"saveSettings\">Сохранить</button></div>';document.getElementById('saveSettings').onclick=async function(){await api('/api/settings',{method:'POST',body:JSON.stringify({group_name:document.getElementById('groupName').value,timezone:document.getElementById('tz').value})});toast('Настройки сохранены')}}\ndocument.getElementById('logout').onclick=async function(){\n  await api('/api/logout',{method:'POST',body:'{}'});\n  var tg=window.Telegram&&window.Telegram.WebApp;\n  if(tg&&tg.initData){\n    try{tg.close();return}catch(e){}\n  }\n  location.reload();\n};\ndocument.getElementById('passPane').onsubmit=async function(e){e.preventDefault();try{await api('/api/auth/password',{method:'POST',body:JSON.stringify({login:document.getElementById('login').value,password:document.getElementById('password').value})});await boot()}catch(err){document.getElementById('authMsg').textContent=err.message}};\ndocument.getElementById('globalSearch').onkeydown=async function(e){if(e.key!=='Enter')return;var q=this.value.trim();if(!q)return;var d=await api('/api/search?q='+encodeURIComponent(q));modal('<h3>🔎 Поиск</h3><div class=\"list\">'+d.results.map(function(x){return '<div class=\"list-item\"><b>'+esc(x.title)+'</b><span class=\"muted\">'+esc(x.subtitle||'')+'</span></div>'}).join('')+'</div>')};\nasync function boot(){\n  var tg=window.Telegram&&window.Telegram.WebApp;\n\n  // В Telegram всегда сначала подтверждаем initData и создаём/обновляем веб-сессию.\n  // Поэтому после выхода и нового открытия кнопки автовход снова работает.\n  if(tg&&tg.initData){\n    try{\n      tg.ready();\n      tg.expand();\n      await api('/api/auth/telegram',{\n        method:'POST',\n        body:JSON.stringify({initData:tg.initData})\n      });\n      state.me=await api('/api/me');\n      showShell();\n      return;\n    }catch(err){\n      showAuth();\n      document.getElementById('authMsg').textContent=err.message;\n      document.getElementById('tgAuto').textContent='🔒 Автовход Telegram не разрешён для этого аккаунта.';\n      return;\n    }\n  }\n\n  // Обычный браузер: используем сохранённую cookie-сессию, иначе показываем логин/пароль.\n  try{\n    state.me=await api('/api/me');\n    showShell();\n  }catch(e){\n    showAuth();\n    document.getElementById('tgAuto').textContent='Прямой вход: используйте логин и пароль.';\n  }\n}\nboot();\n})();\n</script>\n</body>\n</html>";
 
 async function ensureColumn(env, table, column, sqlType) {
     const info = await env.DB.prepare(`PRAGMA table_info(${table})`).all();
@@ -5050,106 +4892,277 @@ async function orderedStudents(env, activeOnly=true) {
     `).all()).results || [];
 }
 
+
+function normAttendanceStatus(status) {
+    const s = String(status || "none");
+    return s === "excused" ? "sick" : s;
+}
+
+function smartDayStatus(dailyStatus, pairRows, lessons) {
+    const daily = normAttendanceStatus(dailyStatus);
+    const totalLessons = Math.max(1, Number(lessons || 4));
+    const byLesson = new Map();
+
+    for (const r of pairRows || []) {
+        const n = Number(r.lesson_no);
+        if (n >= 1 && n <= totalLessons) {
+            const st = normAttendanceStatus(r.status);
+            if (st !== "none") byLesson.set(n, st);
+        }
+    }
+
+    const statuses = [];
+    for (let n = 1; n <= totalLessons; n++) statuses.push(byLesson.get(n) || "none");
+
+    const recorded = statuses.filter(x => x !== "none");
+    const isPresentLike = st => st === "present" || st === "late";
+    const isAwayLike = st => ["absent","sick","application"].includes(st);
+    const presentLessons = [];
+    const awayLessons = [];
+    const lateLessons = [];
+    const leftLessons = [];
+
+    statuses.forEach((st, i) => {
+        const n = i + 1;
+        if (isPresentLike(st)) presentLessons.push(n);
+        if (isAwayLike(st)) awayLessons.push(n);
+        if (st === "late") lateLessons.push(n);
+        if (st === "left") leftLessons.push(n);
+    });
+
+    const representative = (kind) => ({
+        full_sick:"sick", full_application:"application", full_absent:"absent",
+        late:"late", arrived_later:"late", left_early:"left",
+        partial_absence:"absent", mixed:"absent", present:"present", none:"none",
+        conflict:"absent"
+    }[kind] || "none");
+
+    // Если по парам есть хотя бы одно реальное присутствие — дневной "болеет/нет/заявление"
+    // больше НЕ может сделать ученика отсутствующим за весь день.
+    if (presentLessons.length) {
+        const first = Math.min(...presentLessons);
+        const last = Math.max(...presentLessons);
+        const before = statuses.slice(0, first - 1).some(isAwayLike);
+        const after = statuses.slice(last).some(st => isAwayLike(st) || st === "left");
+        const middle = statuses.slice(first - 1, last).some(isAwayLike);
+
+        let kind = "present";
+        let label = "Присутствовал";
+
+        if (before && after) {
+            kind = "partial_absence";
+            label = `Частичное посещение: был с ${first}-й по ${last}-ю пару`;
+        } else if (before) {
+            kind = "arrived_later";
+            label = `Пришёл с ${first}-й пары`;
+        } else if (after) {
+            kind = "left_early";
+            label = `Ушёл после ${last}-й пары`;
+        } else if (middle) {
+            kind = "partial_absence";
+            label = "Пропустил часть пар";
+        } else if (lateLessons.length) {
+            kind = "late";
+            label = lateLessons.length === 1
+                ? `Опоздал на ${lateLessons[0]}-ю пару`
+                : `Опоздания: ${lateLessons.join(", ")} пары`;
+        }
+
+        return {
+            kind, status:representative(kind), label,
+            full_day:false, sick_full:false, absent_full:false, application_full:false,
+            present_any:true, first_present:first, last_present:last,
+            missed_lessons:awayLessons.length, late_lessons:lateLessons.length,
+            left_lessons:leftLessons.length, pair_statuses:statuses
+        };
+    }
+
+    // Ни на одной отмеченной паре присутствия нет.
+    if (recorded.length) {
+        const allSame = recorded.every(x => x === recorded[0]);
+        const coveredAll = statuses.every(x => x !== "none");
+        const sameAsDaily = daily !== "none" && allSame && recorded[0] === daily;
+        const fullStatus = allSame && ["sick","application","absent"].includes(recorded[0]) &&
+            (coveredAll || sameAsDaily);
+
+        if (fullStatus) {
+            const st = recorded[0];
+            const kind = st === "sick" ? "full_sick" : st === "application" ? "full_application" : "full_absent";
+            const label = st === "sick" ? "Болеет весь день" : st === "application" ? "По заявлению весь день" : "Отсутствует весь день";
+            return {
+                kind,status:st,label,full_day:true,
+                sick_full:st==="sick", absent_full:st==="absent", application_full:st==="application",
+                present_any:false, first_present:null,last_present:null,
+                missed_lessons:awayLessons.length || totalLessons,
+                late_lessons:lateLessons.length,left_lessons:leftLessons.length,pair_statuses:statuses
+            };
+        }
+
+        // Дневной полный статус допустим только если пары ему не противоречат.
+        if (["sick","application","absent"].includes(daily) &&
+            recorded.every(st => st === daily || st === "none")) {
+            const kind = daily === "sick" ? "full_sick" : daily === "application" ? "full_application" : "full_absent";
+            return {
+                kind,status:daily,
+                label:daily==="sick"?"Болеет весь день":daily==="application"?"По заявлению весь день":"Отсутствует весь день",
+                full_day:true,sick_full:daily==="sick",absent_full:daily==="absent",application_full:daily==="application",
+                present_any:false,first_present:null,last_present:null,
+                missed_lessons:awayLessons.length || totalLessons,
+                late_lessons:lateLessons.length,left_lessons:leftLessons.length,pair_statuses:statuses
+            };
+        }
+
+        return {
+            kind:"partial_absence",status:"absent",label:"Частичное отсутствие",
+            full_day:false,sick_full:false,absent_full:false,application_full:false,
+            present_any:false,first_present:null,last_present:null,
+            missed_lessons:awayLessons.length,late_lessons:lateLessons.length,
+            left_lessons:leftLessons.length,pair_statuses:statuses
+        };
+    }
+
+    // Если парных отметок нет — используем дневной статус как итог.
+    if (daily === "sick") return {
+        kind:"full_sick",status:"sick",label:"Болеет весь день",full_day:true,
+        sick_full:true,absent_full:false,application_full:false,present_any:false,
+        first_present:null,last_present:null,missed_lessons:totalLessons,late_lessons:0,left_lessons:0,pair_statuses:statuses
+    };
+    if (daily === "application") return {
+        kind:"full_application",status:"application",label:"По заявлению весь день",full_day:true,
+        sick_full:false,absent_full:false,application_full:true,present_any:false,
+        first_present:null,last_present:null,missed_lessons:totalLessons,late_lessons:0,left_lessons:0,pair_statuses:statuses
+    };
+    if (daily === "absent") return {
+        kind:"full_absent",status:"absent",label:"Отсутствует весь день",full_day:true,
+        sick_full:false,absent_full:true,application_full:false,present_any:false,
+        first_present:null,last_present:null,missed_lessons:totalLessons,late_lessons:0,left_lessons:0,pair_statuses:statuses
+    };
+    if (daily === "late") return {
+        kind:"late",status:"late",label:"Опоздал",full_day:false,
+        sick_full:false,absent_full:false,application_full:false,present_any:true,
+        first_present:1,last_present:totalLessons,missed_lessons:0,late_lessons:1,left_lessons:0,pair_statuses:statuses
+    };
+    if (daily === "left") return {
+        kind:"left_early",status:"left",label:"Ушёл раньше",full_day:false,
+        sick_full:false,absent_full:false,application_full:false,present_any:true,
+        first_present:1,last_present:null,missed_lessons:0,late_lessons:0,left_lessons:1,pair_statuses:statuses
+    };
+    if (daily === "present") return {
+        kind:"present",status:"present",label:"Присутствовал",full_day:false,
+        sick_full:false,absent_full:false,application_full:false,present_any:true,
+        first_present:1,last_present:totalLessons,missed_lessons:0,late_lessons:0,left_lessons:0,pair_statuses:statuses
+    };
+
+    return {
+        kind:"none",status:"none",label:"Нет отметки",full_day:false,
+        sick_full:false,absent_full:false,application_full:false,present_any:false,
+        first_present:null,last_present:null,missed_lessons:0,late_lessons:0,left_lessons:0,pair_statuses:statuses
+    };
+}
+
+async function smartMonthData(env, month) {
+    const students = await orderedStudents(env,true);
+    const dailyRows = (await env.DB.prepare(`
+        SELECT date,student_id,status FROM attendance
+        WHERE substr(date,1,7)=?
+    `).bind(month).all()).results || [];
+    const pairRows = (await env.DB.prepare(`
+        SELECT date,student_id,lesson_no,status FROM lesson_attendance
+        WHERE substr(date,1,7)=?
+    `).bind(month).all()).results || [];
+
+    const dates = new Set([...dailyRows.map(r=>r.date), ...pairRows.map(r=>r.date)]);
+    const dailyMap = new Map(dailyRows.map(r=>[`${r.date}:${r.student_id}`,r.status]));
+    const pairMap = new Map();
+    for (const r of pairRows) {
+        const k = `${r.date}:${r.student_id}`;
+        if (!pairMap.has(k)) pairMap.set(k,[]);
+        pairMap.get(k).push(r);
+    }
+
+    const byStudent = new Map(students.map(st=>[Number(st.id),{
+        id:st.id,name:st.name,full_days:0,absent:0,left:0,late:0,sick:0,application:0,
+        partial_days:0,present_days:0,total_marked_days:0,days:[]
+    }]));
+
+    for (const date of [...dates].sort()) {
+        const lessons = lessonsCountForDate(date);
+        for (const st of students) {
+            const sid = Number(st.id);
+            const key = `${date}:${sid}`;
+            const daily = dailyMap.get(key) || "none";
+            const pairs = pairMap.get(key) || [];
+            if (daily === "none" && !pairs.length) continue;
+
+            const summary = smartDayStatus(daily,pairs,lessons);
+            const row = byStudent.get(sid);
+            row.total_marked_days++;
+            if (summary.present_any) row.present_days++;
+            if (summary.absent_full) row.full_days++;
+            if (summary.sick_full) row.sick++;
+            if (summary.application_full) row.application++;
+            if (["partial_absence","arrived_later","left_early"].includes(summary.kind)) row.partial_days++;
+
+            // ❌ — именно пропущенные пары. Для полного отсутствия без парных строк считаем все пары дня.
+            const explicitAbsent = pairs.filter(r=>normAttendanceStatus(r.status)==="absent").length;
+            row.absent += explicitAbsent || (summary.absent_full ? lessons : 0);
+            row.late += pairs.filter(r=>normAttendanceStatus(r.status)==="late").length || (summary.kind==="late" ? 1 : 0);
+            row.left += pairs.filter(r=>normAttendanceStatus(r.status)==="left").length || (summary.kind==="left_early" ? 1 : 0);
+            row.days.push({date,...summary});
+        }
+    }
+
+    return {students, rows:[...byStudent.values()]};
+}
+
 async function dashboardApi(env) {
     const date = localDate();
     const students = await orderedStudents(env,true);
+    const dailyRows = (await env.DB.prepare(`SELECT student_id,status FROM attendance WHERE date=?`).bind(date).all()).results || [];
+    const pairRows = (await env.DB.prepare(`SELECT student_id,status,lesson_no FROM lesson_attendance WHERE date=?`).bind(date).all()).results || [];
+    const duty = (await env.DB.prepare(`SELECT s.id,s.name FROM duty d JOIN students s ON s.id=d.student_id WHERE d.date=?`).bind(date).all()).results || [];
 
-    const dailyRows = (await env.DB.prepare(
-        `SELECT student_id,status FROM attendance WHERE date=?`
-    ).bind(date).all()).results || [];
-
-    const pairRows = (await env.DB.prepare(
-        `SELECT student_id,status,lesson_no FROM lesson_attendance WHERE date=?`
-    ).bind(date).all()).results || [];
-
-    const dailyByStudent = new Map(dailyRows.map(r => [Number(r.student_id), r.status]));
-
-    const uniqueIds = statuses => {
-        const ids = new Set();
-        for (const r of dailyRows) if (statuses.includes(r.status)) ids.add(Number(r.student_id));
-        for (const r of pairRows) if (statuses.includes(r.status)) ids.add(Number(r.student_id));
-        return ids;
-    };
-
-    const absentIds = uniqueIds(["absent"]);
-    const sickIds = uniqueIds(["sick","excused"]);
-    const applicationIds = uniqueIds(["application"]);
-
-    const today = [];
-    const metaMap = {
-        absent:["❌","Отсутствует"],
-        late:["⏰","Опоздал"],
-        sick:["🤒","Болеет"],
-        excused:["🤒","Болеет"],
-        application:["📝","По заявлению"],
-        left:["🚪","Ушёл раньше"]
-    };
-
-    // Одна общая запись за день.
-    for (const r of dailyRows) {
-        const meta = metaMap[r.status];
-        if (!meta) continue;
-        const st = students.find(s => Number(s.id) === Number(r.student_id));
-        if (st) today.push({name:st.name,icon:meta[0],text:meta[1]});
-    }
-
-    // По парам добавляем только отдельные события и не дублируем дневной статус.
+    const dailyMap = new Map(dailyRows.map(r=>[Number(r.student_id),r.status]));
+    const pairMap = new Map();
     for (const r of pairRows) {
-        const meta = metaMap[r.status];
-        if (!meta) continue;
-
-        const sid = Number(r.student_id);
-        const ds = dailyByStudent.get(sid);
-        const pairNorm = r.status === "excused" ? "sick" : r.status;
-        const dayNorm = ds === "excused" ? "sick" : ds;
-
-        if (pairNorm === dayNorm) continue;
-
-        const st = students.find(s => Number(s.id) === sid);
-        if (st) today.push({
-            name:st.name,
-            icon:meta[0],
-            text:`${meta[1]}, ${r.lesson_no} пара`
-        });
+        const sid=Number(r.student_id);
+        if(!pairMap.has(sid)) pairMap.set(sid,[]);
+        pairMap.get(sid).push(r);
     }
 
-    const duty = (await env.DB.prepare(
-        `SELECT s.id,s.name FROM duty d JOIN students s ON s.id=d.student_id WHERE d.date=?`
-    ).bind(date).all()).results || [];
+    const summaries=[];
+    for (const st of students) {
+        const summary=smartDayStatus(dailyMap.get(Number(st.id))||"none",pairMap.get(Number(st.id))||[],lessonsCountForDate(date));
+        summaries.push({id:st.id,name:st.name,...summary});
+    }
+
+    const today=summaries
+        .filter(x=>!["present","none"].includes(x.kind))
+        .map(x=>({
+            id:x.id,name:x.name,
+            icon:x.status==="sick"?"🤒":x.status==="application"?"📝":x.status==="late"?"⏰":x.status==="left"?"🚪":"❌",
+            text:x.label,kind:x.kind,status:x.status
+        }));
 
     return {
-        students: students.length,
-        absent: absentIds.size,
-        sick: sickIds.size,
-        application: applicationIds.size,
-        today,
-        duty
+        date,
+        students:students.length,
+        absent:summaries.filter(x=>x.absent_full).length,
+        sick:summaries.filter(x=>x.sick_full).length,
+        application:summaries.filter(x=>x.application_full).length,
+        partial:summaries.filter(x=>["partial_absence","arrived_later","left_early"].includes(x.kind)).length,
+        late:summaries.filter(x=>x.kind==="late").length,
+        today,duty,summaries
     };
 }
-
 async function parentsApi(env, month) {
-    const students = await orderedStudents(env,true);
-    const pair = await env.DB.prepare(`
-        SELECT student_id,
-        SUM(status='absent') absent,
-        SUM(status='left') leftc,
-        SUM(status='late') late,
-        SUM(status IN ('sick','excused')) sick,
-        SUM(status='application') application
-        FROM lesson_attendance WHERE substr(date,1,7)=? GROUP BY student_id
-    `).bind(month).all();
-    const days = await env.DB.prepare(`
-        SELECT student_id,SUM(status='absent') full_days FROM attendance
-        WHERE substr(date,1,7)=? GROUP BY student_id
-    `).bind(month).all();
-    const pm=new Map((pair.results||[]).map(r=>[Number(r.student_id),r]));
-    const dm=new Map((days.results||[]).map(r=>[Number(r.student_id),r]));
-    return students.map(s=>{const p=pm.get(Number(s.id))||{},d=dm.get(Number(s.id))||{};return {
-        id:s.id,name:s.name,full_days:Number(d.full_days||0),absent:Number(p.absent||0),left:Number(p.leftc||0),
-        late:Number(p.late||0),sick:Number(p.sick||0),application:Number(p.application||0)
-    }});
+    const smart = await smartMonthData(env,month);
+    return smart.rows.map(r=>({
+        id:r.id,name:r.name,full_days:r.full_days,absent:r.absent,left:r.left,late:r.late,
+        sick:r.sick,application:r.application,partial_days:r.partial_days,
+        attendance_percent:r.total_marked_days ? Math.round(r.present_days/r.total_marked_days*100) : 0
+    }));
 }
-
 async function handleWebApi(request, env, url) {
     try {
         const path = url.pathname;
@@ -5201,89 +5214,38 @@ async function handleWebApi(request, env, url) {
             const student = await env.DB.prepare(`SELECT * FROM students WHERE id=?`).bind(id).first();
             if (!student) return jsonResponse({error:"Ученик не найден"},404);
 
-            const dailyRows = (await env.DB.prepare(`
-                SELECT date,status,NULL AS lesson_no
-                FROM attendance
-                WHERE student_id=?
-                ORDER BY date DESC
-                LIMIT 120
-            `).bind(id).all()).results || [];
+            const dailyRows=(await env.DB.prepare(`SELECT date,status FROM attendance WHERE student_id=? ORDER BY date DESC LIMIT 180`).bind(id).all()).results||[];
+            const pairRows=(await env.DB.prepare(`SELECT date,status,lesson_no FROM lesson_attendance WHERE student_id=? ORDER BY date DESC,lesson_no ASC LIMIT 500`).bind(id).all()).results||[];
+            const dates=[...new Set([...dailyRows.map(r=>r.date),...pairRows.map(r=>r.date)])].sort().reverse();
+            const dailyMap=new Map(dailyRows.map(r=>[r.date,r.status]));
+            const pairMap=new Map();
+            for(const r of pairRows){if(!pairMap.has(r.date))pairMap.set(r.date,[]);pairMap.get(r.date).push(r)}
 
-            const pairRows = (await env.DB.prepare(`
-                SELECT date,status,lesson_no
-                FROM lesson_attendance
-                WHERE student_id=?
-                ORDER BY date DESC,lesson_no DESC
-                LIMIT 300
-            `).bind(id).all()).results || [];
-
-            const dailyMap = new Map(dailyRows.map(r => [r.date, r.status]));
-            const events = [];
-
-            // Посещение за день показываем один раз.
-            for (const r of dailyRows) {
+            const events=[];
+            let absent=0,sick=0,application=0,presentDays=0,countedDays=0,partial=0;
+            for(const date of dates){
+                const pairs=pairMap.get(date)||[];
+                const summary=smartDayStatus(dailyMap.get(date)||"none",pairs,lessonsCountForDate(date));
+                if(summary.kind==="none")continue;
+                countedDays++;
+                if(summary.present_any)presentDays++;
+                if(summary.absent_full)absent++;
+                if(summary.sick_full)sick++;
+                if(summary.application_full)application++;
+                if(["partial_absence","arrived_later","left_early"].includes(summary.kind))partial++;
                 events.push({
-                    date:r.date,
-                    status:r.status,
-                    lesson_no:null,
-                    source:"day"
+                    date,status:summary.status,kind:summary.kind,summary_label:summary.label,
+                    source:"summary",lesson_no:null,pair_statuses:summary.pair_statuses,
+                    missed_lessons:summary.missed_lessons
                 });
             }
-
-            // "Присутствовал на 1/2/3/4 паре" в историю не добавляем.
-            // Отдельно оставляем только важные события по парам.
-            for (const r of pairRows) {
-                if (r.status === "present" || r.status === "none") continue;
-
-                const dayStatus = dailyMap.get(r.date);
-                const pairNorm = r.status === "excused" ? "sick" : r.status;
-                const dayNorm = dayStatus === "excused" ? "sick" : dayStatus;
-
-                // Если за весь день уже стоит тот же статус — дубль не нужен.
-                if (pairNorm === dayNorm) continue;
-
-                events.push({
-                    date:r.date,
-                    status:r.status,
-                    lesson_no:r.lesson_no,
-                    source:"pair"
-                });
-            }
-
-            events.sort((a,b) =>
-                b.date.localeCompare(a.date) ||
-                Number(b.lesson_no || 0) - Number(a.lesson_no || 0)
-            );
-
-            // Считаем дни, а не количество строк из двух таблиц.
-            const absentDays = new Set();
-            const sickDays = new Set();
-            const applicationDays = new Set();
-
-            for (const r of dailyRows) {
-                if (r.status === "absent") absentDays.add(r.date);
-                if (["sick","excused"].includes(r.status)) sickDays.add(r.date);
-                if (r.status === "application") applicationDays.add(r.date);
-            }
-            for (const r of pairRows) {
-                if (r.status === "absent") absentDays.add(r.date);
-                if (["sick","excused"].includes(r.status)) sickDays.add(r.date);
-                if (r.status === "application") applicationDays.add(r.date);
-            }
-
-            const counted = dailyRows.filter(r => ["present","absent","late"].includes(r.status)).length;
-            const present = dailyRows.filter(r => ["present","late"].includes(r.status)).length;
 
             return jsonResponse({
-                student,
-                absent:absentDays.size,
-                sick:sickDays.size,
-                application:applicationDays.size,
-                attendance_percent:counted ? Math.round(present/counted*100) : 0,
-                events:events.slice(0,40)
+                student,absent,sick,application,partial,
+                attendance_percent:countedDays?Math.round(presentDays/countedDays*100):0,
+                events:events.slice(0,60)
             });
         }
-
         if (path==="/api/attendance" && request.method==="GET") {
             const date=qdate(url.searchParams.get("date"));
             const rows=(await env.DB.prepare(`SELECT student_id,status FROM attendance WHERE date=?`).bind(date).all()).results||[];
@@ -5318,20 +5280,30 @@ async function handleWebApi(request, env, url) {
 
         if (path==="/api/calendar") {
             const month=qmonth(url.searchParams.get("month"));
-            const rows=(await env.DB.prepare(`SELECT date,
-                SUM(status='absent') absent,SUM(status IN ('sick','excused')) sick,SUM(status='application') application
-                FROM lesson_attendance WHERE substr(date,1,7)=? GROUP BY date`).bind(month).all()).results||[];
-            return jsonResponse({month,days:Object.fromEntries(rows.map(r=>[r.date,{absent:Number(r.absent||0),sick:Number(r.sick||0),application:Number(r.application||0)}]))});
+            const smart=await smartMonthData(env,month);
+            const days={};
+            for(const st of smart.rows){
+                for(const d of st.days){
+                    const q=days[d.date] ||= {absent:0,sick:0,application:0,partial:0};
+                    if(d.absent_full)q.absent++;
+                    if(d.sick_full)q.sick++;
+                    if(d.application_full)q.application++;
+                    if(["partial_absence","arrived_later","left_early"].includes(d.kind))q.partial++;
+                }
+            }
+            return jsonResponse({month,days});
         }
 
         if (path==="/api/health") {
-            const month=qmonth(url.searchParams.get("month")),students=await orderedStudents(env,true);
-            const rows=(await env.DB.prepare(`SELECT student_id,SUM(status IN ('sick','excused')) sick,SUM(status='application') application
-                FROM lesson_attendance WHERE substr(date,1,7)=? GROUP BY student_id`).bind(month).all()).results||[];
-            const m=new Map(rows.map(r=>[Number(r.student_id),r])); const out=students.map(s=>{const r=m.get(Number(s.id))||{};return {id:s.id,name:s.name,sick:Number(r.sick||0),application:Number(r.application||0)}});
-            return jsonResponse({month,rows:out,sick_total:out.reduce((a,x)=>a+x.sick,0),application_total:out.reduce((a,x)=>a+x.application,0)});
+            const month=qmonth(url.searchParams.get("month"));
+            const smart=await smartMonthData(env,month);
+            const rows=smart.rows.map(r=>({id:r.id,name:r.name,sick:r.sick,application:r.application,partial:r.partial_days}));
+            return jsonResponse({
+                month,rows,
+                sick_total:rows.reduce((a,x)=>a+x.sick,0),
+                application_total:rows.reduce((a,x)=>a+x.application,0)
+            });
         }
-
         if (path==="/api/duty" && request.method==="GET") {
             const date=qdate(url.searchParams.get("date")); const students=(await env.DB.prepare(`SELECT s.id,s.name FROM duty d JOIN students s ON s.id=d.student_id WHERE d.date=? ORDER BY s.name`).bind(date).all()).results||[];
             return jsonResponse({date,students});
@@ -5359,17 +5331,22 @@ async function handleWebApi(request, env, url) {
         if (path==="/api/parents") return jsonResponse({month:qmonth(url.searchParams.get("month")),rows:await parentsApi(env,qmonth(url.searchParams.get("month")))});
 
         if (path==="/api/stats") {
-            const month=qmonth(url.searchParams.get("month")),rows=await parentsApi(env,month);
-            const detail=[]; for(const r of rows){const cnt=await env.DB.prepare(`SELECT
-                SUM(status='present') present,SUM(status='late') late,SUM(status='absent') absent
-                FROM lesson_attendance WHERE student_id=? AND substr(date,1,7)=?`).bind(r.id,month).first();
-                const counted=Number(cnt?.present||0)+Number(cnt?.late||0)+Number(cnt?.absent||0);
-                detail.push({...r,percent:counted?Math.round((Number(cnt?.present||0)+Number(cnt?.late||0))/counted*100):0});
-            }
+            const month=qmonth(url.searchParams.get("month"));
+            const smart=await smartMonthData(env,month);
+            const detail=smart.rows.map(r=>({
+                id:r.id,name:r.name,full_days:r.full_days,absent:r.absent,left:r.left,late:r.late,
+                sick:r.sick,application:r.application,partial_days:r.partial_days,
+                percent:r.total_marked_days?Math.round(r.present_days/r.total_marked_days*100):0
+            }));
             const gp=detail.length?Math.round(detail.reduce((a,x)=>a+x.percent,0)/detail.length):0;
-            return jsonResponse({month,rows:detail,group_percent:gp,total_absent:detail.reduce((a,x)=>a+x.absent,0),total_sick:detail.reduce((a,x)=>a+x.sick,0),total_application:detail.reduce((a,x)=>a+x.application,0)});
+            return jsonResponse({
+                month,rows:detail,group_percent:gp,
+                total_absent:detail.reduce((a,x)=>a+x.absent,0),
+                total_sick:detail.reduce((a,x)=>a+x.sick,0),
+                total_application:detail.reduce((a,x)=>a+x.application,0),
+                total_partial:detail.reduce((a,x)=>a+x.partial_days,0)
+            });
         }
-
         if (path==="/api/online") {
             const rows=(await env.DB.prepare(`SELECT a.display_name,a.login,a.telegram_user_id,MAX(s.last_seen) last_seen
                 FROM web_accounts a LEFT JOIN web_sessions s ON s.account_id=a.id WHERE a.enabled=1 GROUP BY a.id ORDER BY last_seen DESC`).all()).results||[];
