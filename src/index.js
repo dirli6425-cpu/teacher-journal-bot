@@ -25,34 +25,53 @@ export default {
         const url = new URL(request.url);
         try {
             await initDb(env);
-            if (request.method === "GET" &&
-                url.pathname === "/setup") {
+            await rememberWebOrigin(env, url.origin);
+
+            if (request.method === "GET" && url.pathname === "/setup") {
                 const webhookUrl = `${url.origin}/webhook`;
                 const result = await telegram(env, "setWebhook", {
                     url: webhookUrl,
-                    allowed_updates: [
-                        "message",
-                        "callback_query"
-                    ]
+                    allowed_updates: ["message", "callback_query"]
                 });
                 return textResponse(result.ok
                     ? `Webhook установлен!\n${webhookUrl}`
                     : `Ошибка:\n${JSON.stringify(result)}`);
             }
-            if (request.method === "POST" &&
-                url.pathname === "/webhook") {
+
+            if (request.method === "POST" && url.pathname === "/webhook") {
                 const update = await request.json();
                 await handleUpdate(update, env);
                 return new Response("OK");
             }
-            return textResponse("Teacher Journal Bot v2 is running! 📚");
-        }
-        catch (error) {
+
+            if (url.pathname.startsWith("/api/")) {
+                return await handleWebApi(request, env, url);
+            }
+
+            if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/app")) {
+                return new Response(WEB_APP_HTML, {
+                    headers: {
+                        "content-type": "text/html; charset=UTF-8",
+                        "cache-control": "no-store"
+                    }
+                });
+            }
+
+            if (request.method === "GET" && url.pathname === "/health") {
+                return jsonResponse({ ok: true, service: "Journal 102" });
+            }
+
+            return new Response("Not found", { status: 404 });
+        } catch (error) {
             console.error(error);
+            if (url.pathname.startsWith("/api/")) {
+                return jsonResponse({ error: String(error?.message || error) }, 500);
+            }
             return textResponse("Worker error", 500);
         }
     }
 };
+
 function textResponse(text, status = 200) {
     return new Response(text, {
         status,
@@ -4282,8 +4301,10 @@ showMainMenu =
                         ],
                         [
                             {
-                                text: "🌐 Веб-версия • в разработке",
-                                callback_data: "web_dev"
+                                text: "🌐 Веб-версия",
+                                web_app: {
+                                    url: await getWebAppUrl(env)
+                                }
                             }
                         ]
                     ]
@@ -4769,4 +4790,562 @@ handleExtraCallback = async function(
         messageId,
         userId
     );
+};
+
+
+
+const WEB_APP_HTML = "<!doctype html>\n<html lang=\"ru\">\n<head>\n<meta charset=\"utf-8\">\n<meta name=\"viewport\" content=\"width=device-width,initial-scale=1,viewport-fit=cover\">\n<meta name=\"theme-color\" content=\"#10131a\">\n<title>Журнал группы 102</title>\n<style>\n:root{--bg:#0d1016;--panel:#151a23;--panel2:#1c2330;--text:#f5f7fb;--muted:#9da9bb;--line:#2a3445;--accent:#5b8cff;--good:#39c98a;--bad:#ff5d69;--warn:#ffbe55;--radius:18px}\n*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif}\nbutton,input,select,textarea{font:inherit}.hidden{display:none!important}.muted{color:var(--muted)}.small{font-size:12px}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}\n#auth{min-height:100vh;display:grid;place-items:center;padding:22px}.auth-card{width:min(440px,100%);background:var(--panel);border:1px solid var(--line);border-radius:26px;padding:24px;box-shadow:0 24px 70px #0008}.brand{display:flex;gap:14px;align-items:center;margin-bottom:22px}.logo{width:58px;height:58px;border-radius:16px;background:linear-gradient(135deg,#315fe9,#71a1ff);display:grid;place-items:center;font-size:30px}.auth-tabs{display:flex;background:var(--panel2);border-radius:14px;padding:4px;margin:16px 0}.auth-tabs button{flex:1;border:0;background:none;color:var(--muted);padding:10px;border-radius:10px}.auth-tabs button.on{background:#2a3445;color:#fff}.field{display:flex;flex-direction:column;gap:7px;margin:12px 0}.field input,.field select,.field textarea{background:#0f141d;color:#fff;border:1px solid var(--line);border-radius:12px;padding:12px}.btn{border:0;border-radius:12px;padding:11px 15px;background:var(--accent);color:#fff;font-weight:700;cursor:pointer}.btn.secondary{background:var(--panel2);border:1px solid var(--line)}.btn.danger{background:#5b2228}.btn.ghost{background:transparent;border:1px solid var(--line)}.btn:disabled{opacity:.45}.code{font-size:38px;letter-spacing:8px;text-align:center;font-weight:900;margin:14px 0}\n#shell{min-height:100vh}.sidebar{position:fixed;inset:0 auto 0 0;width:260px;background:#10151e;border-right:1px solid var(--line);padding:18px 12px;overflow:auto;z-index:20}.side-brand{padding:8px 10px 18px;font-size:20px;font-weight:900}.navbtn{width:100%;display:flex;gap:10px;align-items:center;border:0;background:transparent;color:#c3ccda;padding:11px 12px;border-radius:12px;text-align:left;cursor:pointer;margin:2px 0}.navbtn.on,.navbtn:hover{background:var(--panel2);color:#fff}.main{margin-left:260px;min-height:100vh}.topbar{height:68px;position:sticky;top:0;z-index:10;background:#0d1016e8;backdrop-filter:blur(12px);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;padding:0 22px}.topbar h1{font-size:20px;margin:0}.spacer{flex:1}.search{max-width:320px;width:35%;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:9px 12px;color:#fff}.content{padding:22px;max-width:1500px;margin:auto}.grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px}.metric{font-size:30px;font-weight:900;margin-top:8px}.section-head{display:flex;align-items:center;gap:10px;margin-bottom:14px}.section-head h2{margin:0;font-size:21px}.section-head .actions{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}.toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:14px}.table{width:100%;border-collapse:collapse;min-width:680px}.table th,.table td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left}.table th{color:var(--muted);font-size:12px;text-transform:uppercase;position:sticky;top:0;background:var(--panel)}.statusbtn{border:1px solid var(--line);background:#0f141d;color:#fff;border-radius:10px;padding:7px 10px;cursor:pointer;white-space:nowrap}.student{display:flex;align-items:center;gap:10px}.avatar{width:34px;height:34px;border-radius:10px;background:#26334a;display:grid;place-items:center;font-weight:800}.pill{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:4px 8px;font-size:12px}.list{display:flex;flex-direction:column;gap:8px}.list-item{display:flex;align-items:center;gap:10px;padding:11px;background:var(--panel2);border-radius:12px}.modal-bg{position:fixed;inset:0;background:#0009;z-index:50;display:grid;place-items:center;padding:18px}.modal{width:min(650px,100%);max-height:90vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:20px;padding:18px}.modal h3{margin-top:0}.status-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.status-grid button{padding:14px 8px}.tabs{display:flex;gap:6px;overflow:auto;margin-bottom:12px}.tabs button{white-space:nowrap}.calendar{display:grid;grid-template-columns:repeat(7,1fr);gap:8px}.day{min-height:90px;background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:8px}.day strong{display:block}.chart{display:flex;align-items:end;gap:5px;height:160px;border-bottom:1px solid var(--line);padding:8px}.bar{flex:1;background:var(--accent);min-width:10px;border-radius:6px 6px 0 0;opacity:.85}.toast{position:fixed;right:18px;bottom:18px;background:#202939;border:1px solid var(--line);padding:12px 16px;border-radius:12px;z-index:80}.mobile-nav{display:none}\n@media(max-width:1000px){.grid{grid-template-columns:repeat(2,1fr)}.sidebar{width:220px}.main{margin-left:220px}}\n@media(max-width:760px){.sidebar{display:none}.main{margin:0}.topbar{height:58px;padding:0 12px}.topbar .search{display:none}.content{padding:12px 12px 86px}.grid{grid-template-columns:1fr 1fr;gap:9px}.card{padding:13px;border-radius:15px}.metric{font-size:25px}.mobile-nav{display:flex;position:fixed;bottom:0;left:0;right:0;background:#10151ef3;border-top:1px solid var(--line);z-index:30;padding:7px 6px max(7px,env(safe-area-inset-bottom));justify-content:space-around}.mobile-nav button{border:0;background:none;color:#aab4c4;font-size:11px;min-width:54px}.mobile-nav button b{display:block;font-size:21px}.mobile-nav button.on{color:#fff}.section-head{align-items:flex-start}.section-head .actions{flex-direction:column}.calendar{gap:4px}.day{min-height:72px;padding:5px;font-size:11px}.status-grid{grid-template-columns:1fr 1fr}}\n</style>\n</head>\n<body>\n<div id=\"auth\">\n  <div class=\"auth-card\">\n    <div class=\"brand\"><div class=\"logo\">📚</div><div><h2 style=\"margin:0\">Журнал группы 102</h2><div class=\"muted\">Закрытая система преподавателя</div></div></div>\n    <div id=\"tgAuto\" class=\"muted small\">Проверяем вход через Telegram…</div>\n    <div class=\"auth-tabs\"><button id=\"tabTg\" class=\"on\">Telegram</button><button id=\"tabPass\">Логин / пароль</button></div>\n    <div id=\"tgPane\">\n      <p>Нажмите кнопку — сайт выдаст код. Отправьте боту команду <b>/weblogin КОД</b>. После подтверждения вход откроется автоматически.</p>\n      <button class=\"btn\" id=\"startCode\">🔐 Войти через Telegram</button>\n      <div id=\"codeBox\" class=\"hidden\"><div class=\"code\" id=\"loginCode\"></div><div class=\"muted small\" id=\"codeHint\"></div></div>\n    </div>\n    <form id=\"passPane\" class=\"hidden\">\n      <div class=\"field\"><label>Логин</label><input id=\"login\" autocomplete=\"username\"></div>\n      <div class=\"field\"><label>Пароль</label><input id=\"password\" type=\"password\" autocomplete=\"current-password\"></div>\n      <button class=\"btn\" style=\"width:100%\">Войти</button>\n    </form>\n    <div id=\"authMsg\" class=\"small\" style=\"margin-top:12px\"></div>\n  </div>\n</div>\n\n<div id=\"shell\" class=\"hidden\">\n  <aside class=\"sidebar\">\n    <div class=\"side-brand\">📚 Журнал 102</div>\n    <div id=\"sideNav\"></div>\n  </aside>\n  <main class=\"main\">\n    <div class=\"topbar\"><h1 id=\"pageTitle\">Главная</h1><div class=\"spacer\"></div><input class=\"search\" id=\"globalSearch\" placeholder=\"🔎 Поиск\"><button class=\"btn secondary\" id=\"logout\">Выйти</button></div>\n    <div class=\"content\" id=\"content\"></div>\n  </main>\n  <div class=\"mobile-nav\" id=\"mobileNav\"></div>\n</div>\n<div id=\"modalRoot\"></div>\n<script>\n(function(){\nvar state={me:null,page:'dashboard',students:[],date:new Date().toISOString().slice(0,10),month:new Date().toISOString().slice(0,7)};\nvar nav=[\n ['dashboard','🏠','Главная'],['journal','👥','Журнал'],['pairs','📚','По парам'],['students','👤','Студенты'],\n ['calendar','📅','Календарь'],['health','🤒','Болезни и заявления'],['duty','🧹','Дежурство'],\n ['schedule','🗓️','Расписание'],['parents','👨‍👩‍👦','Родителям'],['analytics','📊','Аналитика'],\n ['reports','📄','Отчёты'],['online','🟢','Онлайн'],['users','👥','Пользователи'],\n ['audit','🛡','Журнал действий'],['settings','⚙️','Настройки']\n];\nvar statusOrder=['none','present','absent','late','sick','application','left'];\nvar statusMeta={none:['➖','Не отмечено'],present:['✅','Присутствует'],absent:['❌','Отсутствует'],late:['⏰','Опоздал'],sick:['🤒','Болеет'],application:['📝','По заявлению'],left:['🚪','Ушёл раньше'],excused:['🤒','Болеет']};\nfunction esc(x){return String(x==null?'':x).replace(/[&<>\"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]})}\nasync function api(path,opt){opt=opt||{};opt.headers=Object.assign({'content-type':'application/json'},opt.headers||{});var r=await fetch(path,opt);var ct=r.headers.get('content-type')||'';if(r.status===401){showAuth();throw new Error('Нужен вход')}if(!r.ok){var e=ct.includes('json')?await r.json():{error:await r.text()};throw new Error(e.error||'Ошибка')}return ct.includes('json')?r.json():r}\nfunction toast(t){var d=document.createElement('div');d.className='toast';d.textContent=t;document.body.appendChild(d);setTimeout(function(){d.remove()},2200)}\nfunction fmtDate(d){try{return new Date(d+'T12:00:00').toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'})}catch(e){return d}}\nfunction showAuth(){document.getElementById('auth').classList.remove('hidden');document.getElementById('shell').classList.add('hidden')}\nfunction showShell(){document.getElementById('auth').classList.add('hidden');document.getElementById('shell').classList.remove('hidden');renderNav();go('dashboard')}\nfunction renderNav(){var html='';nav.forEach(function(n){if((n[0]==='users'||n[0]==='audit'||n[0]==='settings')&&state.me.role!=='owner')return;html+='<button class=\"navbtn '+(state.page===n[0]?'on':'')+'\" data-p=\"'+n[0]+'\"><span>'+n[1]+'</span>'+n[2]+'</button>'});document.getElementById('sideNav').innerHTML=html;document.querySelectorAll('.navbtn').forEach(function(b){b.onclick=function(){go(b.dataset.p)}});var mobile=nav.filter(function(n){return ['dashboard','journal','pairs','students','parents'].includes(n[0])}).map(function(n){return '<button data-p=\"'+n[0]+'\" class=\"'+(state.page===n[0]?'on':'')+'\"><b>'+n[1]+'</b>'+n[2]+'</button>'}).join('');document.getElementById('mobileNav').innerHTML=mobile;document.querySelectorAll('#mobileNav button').forEach(function(b){b.onclick=function(){go(b.dataset.p)}})}\nasync function go(p){state.page=p;renderNav();var n=nav.find(function(x){return x[0]===p});document.getElementById('pageTitle').textContent=n?n[2]:'';var c=document.getElementById('content');c.innerHTML='<div class=\"card\">Загрузка…</div>';try{var fn=pages[p]||pages.dashboard;await fn(c)}catch(e){c.innerHTML='<div class=\"card\">⚠️ '+esc(e.message)+'</div>'}}\nfunction metric(label,val,sub){return '<div class=\"card\"><div class=\"muted\">'+label+'</div><div class=\"metric\">'+val+'</div><div class=\"small muted\">'+(sub||'')+'</div></div>'}\nasync function loadStudents(){state.students=(await api('/api/students')).students;return state.students}\nfunction studentName(id){var s=state.students.find(function(x){return Number(x.id)===Number(id)});return s?s.name:'#'+id}\nfunction statusButton(st,id,kind,date,lesson){var m=statusMeta[st]||statusMeta.none;return '<button class=\"statusbtn\" data-kind=\"'+kind+'\" data-id=\"'+id+'\" data-status=\"'+st+'\" data-date=\"'+date+'\" '+(lesson?'data-lesson=\"'+lesson+'\"':'')+'>'+m[0]+' '+m[1]+'</button>'}\nfunction bindStatusButtons(){document.querySelectorAll('.statusbtn').forEach(function(b){b.onclick=function(){openStatus(b.dataset.kind,b.dataset.id,b.dataset.date,b.dataset.lesson)}})}\nfunction openStatus(kind,id,date,lesson){var buttons=statusOrder.map(function(st){var m=statusMeta[st];return '<button class=\"btn secondary\" data-st=\"'+st+'\">'+m[0]+' '+m[1]+'</button>'}).join('');modal('<h3>'+esc(studentName(id))+'</h3><div class=\"status-grid\">'+buttons+'</div>');document.querySelectorAll('#modalRoot [data-st]').forEach(function(b){b.onclick=async function(){await api(kind==='pair'?'/api/pairs':'/api/attendance',{method:'POST',body:JSON.stringify({student_id:Number(id),date:date,lesson_no:lesson?Number(lesson):undefined,status:b.dataset.st})});closeModal();toast('Сохранено');go(state.page)}})}\nfunction modal(html){document.getElementById('modalRoot').innerHTML='<div class=\"modal-bg\"><div class=\"modal\">'+html+'<div style=\"margin-top:14px\"><button class=\"btn ghost\" id=\"closeModal\">Закрыть</button></div></div></div>';document.getElementById('closeModal').onclick=closeModal}\nfunction closeModal(){document.getElementById('modalRoot').innerHTML=''}\n\nvar pages={};\npages.dashboard=async function(c){var d=await api('/api/dashboard');c.innerHTML='<div class=\"grid\">'+metric('👥 Учеников',d.students)+metric('❌ Нет сегодня',d.absent)+metric('🤒 Болеют',d.sick)+metric('📝 По заявлению',d.application)+'</div><div class=\"grid\" style=\"margin-top:14px;grid-template-columns:2fr 1fr\"><div class=\"card\"><div class=\"section-head\"><h2>Сегодня</h2></div><div class=\"list\">'+(d.today.map(function(x){return '<div class=\"list-item\"><div>'+x.icon+'</div><div><b>'+esc(x.name)+'</b><div class=\"muted small\">'+esc(x.text)+'</div></div></div>'}).join('')||'<div class=\"muted\">Событий нет</div>')+'</div></div><div class=\"card\"><h2 style=\"margin-top:0\">🧹 Дежурные</h2><div>'+((d.duty||[]).map(function(x){return '<div class=\"pill\" style=\"margin:3px\">'+esc(x.name)+'</div>'}).join('')||'<span class=\"muted\">Не назначены</span>')+'</div></div></div>'}\npages.journal=async function(c){await loadStudents();var d=await api('/api/attendance?date='+state.date);var rows=state.students.map(function(s){var st=d.statuses[String(s.id)]||'none';return '<tr><td><div class=\"student\"><div class=\"avatar\">'+esc(s.name[0])+'</div><b>'+esc(s.name)+'</b></div></td><td>'+statusButton(st,s.id,'day',state.date)+'</td></tr>'}).join('');c.innerHTML='<div class=\"section-head\"><h2>👥 Посещаемость</h2><div class=\"actions\"><input type=\"date\" id=\"journalDate\" value=\"'+state.date+'\"><button class=\"btn secondary\" id=\"allPresent\">✅ Все есть</button></div></div><div class=\"table-wrap\"><table class=\"table\"><thead><tr><th>Ученик</th><th>Статус</th></tr></thead><tbody>'+rows+'</tbody></table></div>';document.getElementById('journalDate').onchange=function(){state.date=this.value;go('journal')};document.getElementById('allPresent').onclick=async function(){await api('/api/attendance/all-present',{method:'POST',body:JSON.stringify({date:state.date})});toast('Все отмечены');go('journal')};bindStatusButtons()}\npages.pairs=async function(c){await loadStudents();var d=await api('/api/pairs?date='+state.date);var lessons=d.lessons||4;var head='<th>Ученик</th>';for(var l=1;l<=lessons;l++)head+='<th>'+l+' пара</th>';var rows=state.students.map(function(s){var t='<tr><td><b>'+esc(s.name)+'</b></td>';for(var l=1;l<=lessons;l++){var st=(d.statuses[String(l)]||{})[String(s.id)]||'none';t+='<td>'+statusButton(st,s.id,'pair',state.date,l)+'</td>'}return t+'</tr>'}).join('');c.innerHTML='<div class=\"section-head\"><h2>📚 По парам</h2><div class=\"actions\"><input type=\"date\" id=\"pairDate\" value=\"'+state.date+'\"></div></div><div class=\"table-wrap\"><table class=\"table\"><thead><tr>'+head+'</tr></thead><tbody>'+rows+'</tbody></table></div>';document.getElementById('pairDate').onchange=function(){state.date=this.value;go('pairs')};bindStatusButtons()}\npages.students=async function(c){await loadStudents();c.innerHTML='<div class=\"section-head\"><h2>👤 Студенты</h2><div class=\"actions\"><button class=\"btn\" id=\"addStudent\">+ Добавить</button></div></div><div class=\"list\">'+state.students.map(function(s){return '<div class=\"list-item\"><div class=\"avatar\">'+esc(s.name[0])+'</div><div style=\"flex:1\"><b>'+esc(s.name)+'</b></div><button class=\"btn secondary\" data-card=\"'+s.id+'\">Карточка</button></div>'}).join('')+'</div>';document.getElementById('addStudent').onclick=function(){modal('<h3>Новый ученик</h3><div class=\"field\"><input id=\"newStudent\" placeholder=\"Фамилия Имя\"></div><button class=\"btn\" id=\"saveStudent\">Добавить</button>');document.getElementById('saveStudent').onclick=async function(){await api('/api/students',{method:'POST',body:JSON.stringify({name:document.getElementById('newStudent').value})});closeModal();toast('Добавлен');go('students')}};document.querySelectorAll('[data-card]').forEach(function(b){b.onclick=async function(){var d=await api('/api/student/'+b.dataset.card);modal('<h3>'+esc(d.student.name)+'</h3><div class=\"grid\">'+metric('Посещаемость',d.attendance_percent+'%')+metric('❌ Пропуски',d.absent)+metric('🤒 Болеет',d.sick)+metric('📝 Заявления',d.application)+'</div><h3>Последние события</h3><div class=\"list\">'+d.events.map(function(e){return '<div class=\"list-item\">'+esc(e.date)+' · '+esc((statusMeta[e.status]||['',''])[0]+' '+(statusMeta[e.status]||['',''])[1])+'</div>'}).join('')+'</div>')}})}\npages.calendar=async function(c){var d=await api('/api/calendar?month='+state.month);var first=new Date(state.month+'-01T12:00:00'),start=(first.getDay()+6)%7,days=new Date(first.getFullYear(),first.getMonth()+1,0).getDate(),cells='';for(var i=0;i<start;i++)cells+='<div></div>';for(var x=1;x<=days;x++){var ds=state.month+'-'+String(x).padStart(2,'0'),q=d.days[ds]||{};cells+='<div class=\"day\"><strong>'+x+'</strong><div>❌ '+(q.absent||0)+'</div><div>🤒 '+(q.sick||0)+' · 📝 '+(q.application||0)+'</div></div>'}c.innerHTML='<div class=\"section-head\"><h2>📅 Календарь</h2><div class=\"actions\"><input type=\"month\" id=\"calMonth\" value=\"'+state.month+'\"></div></div><div class=\"calendar\">'+cells+'</div>';document.getElementById('calMonth').onchange=function(){state.month=this.value;go('calendar')}}\npages.health=async function(c){var d=await api('/api/health?month='+state.month);c.innerHTML='<div class=\"section-head\"><h2>🤒 Болезни и заявления</h2><div class=\"actions\"><input type=\"month\" id=\"healthMonth\" value=\"'+state.month+'\"></div></div><div class=\"grid\">'+metric('🤒 Болезни',d.sick_total)+metric('📝 Заявления',d.application_total)+'</div><div class=\"card\" style=\"margin-top:14px\"><div class=\"list\">'+d.rows.map(function(x){return '<div class=\"list-item\"><b style=\"flex:1\">'+esc(x.name)+'</b><span class=\"pill\">🤒 '+x.sick+'</span><span class=\"pill\">📝 '+x.application+'</span></div>'}).join('')+'</div></div>';document.getElementById('healthMonth').onchange=function(){state.month=this.value;go('health')}}\npages.duty=async function(c){await loadStudents();var d=await api('/api/duty?date='+state.date);var chosen=new Set((d.students||[]).map(function(x){return Number(x.id)}));c.innerHTML='<div class=\"section-head\"><h2>🧹 Дежурство</h2><div class=\"actions\"><input type=\"date\" id=\"dutyDate\" value=\"'+state.date+'\"></div></div><div class=\"card\"><div class=\"list\">'+state.students.map(function(s){return '<label class=\"list-item\"><input type=\"checkbox\" data-duty=\"'+s.id+'\" '+(chosen.has(Number(s.id))?'checked':'')+'><span>'+esc(s.name)+'</span></label>'}).join('')+'</div><button class=\"btn\" id=\"saveDuty\" style=\"margin-top:12px\">Сохранить</button></div>';document.getElementById('dutyDate').onchange=function(){state.date=this.value;go('duty')};document.getElementById('saveDuty').onclick=async function(){var ids=[].slice.call(document.querySelectorAll('[data-duty]:checked')).map(function(x){return Number(x.dataset.duty)});await api('/api/duty',{method:'POST',body:JSON.stringify({date:state.date,student_ids:ids})});toast('Сохранено')}}\npages.schedule=async function(c){var d=await api('/api/schedule');var days=['Понедельник','Вторник','Среда','Четверг','Пятница'];c.innerHTML='<div class=\"section-head\"><h2>🗓️ Расписание</h2><div class=\"actions\">'+(state.me.role==='owner'?'<button class=\"btn\" id=\"editSchedule\">Редактировать</button>':'')+'</div></div>'+days.map(function(day,i){var arr=d.days[String(i+1)]||[];return '<div class=\"card\" style=\"margin-bottom:10px\"><b>'+day+'</b><div class=\"list\" style=\"margin-top:10px\">'+arr.map(function(x){return '<div class=\"list-item\"><span class=\"pill\">'+x.lesson_no+'</span><div><b>'+esc(x.subject)+'</b><div class=\"small muted\">'+esc(x.time||'')+(x.teacher?' · '+esc(x.teacher):'')+(x.room?' · каб. '+esc(x.room):'')+'</div></div></div>'}).join('')+'</div></div>'}).join('');var eb=document.getElementById('editSchedule');if(eb)eb.onclick=function(){modal('<h3>Редактирование расписания</h3><p class=\"muted\">В этой версии расписание редактируется через таблицу: выберите день и пару, затем сохраните.</p><div class=\"field\"><select id=\"schDay\">'+days.map(function(x,i){return '<option value=\"'+(i+1)+'\">'+x+'</option>'}).join('')+'</select></div><div class=\"field\"><input id=\"schLesson\" type=\"number\" min=\"1\" max=\"8\" placeholder=\"Номер пары\"></div><div class=\"field\"><input id=\"schSubject\" placeholder=\"Предмет\"></div><div class=\"field\"><input id=\"schTime\" placeholder=\"08:30–09:50\"></div><div class=\"field\"><input id=\"schTeacher\" placeholder=\"Преподаватель\"></div><div class=\"field\"><input id=\"schRoom\" placeholder=\"Кабинет\"></div><button class=\"btn\" id=\"saveSch\">Сохранить</button>');document.getElementById('saveSch').onclick=async function(){await api('/api/schedule',{method:'POST',body:JSON.stringify({weekday:Number(document.getElementById('schDay').value),lesson_no:Number(document.getElementById('schLesson').value),subject:document.getElementById('schSubject').value,time:document.getElementById('schTime').value,teacher:document.getElementById('schTeacher').value,room:document.getElementById('schRoom').value})});closeModal();toast('Расписание сохранено');go('schedule')}}}\npages.parents=async function(c){await loadStudents();var d=await api('/api/parents?month='+state.month);var rows=d.rows.map(function(x){return '<tr><td><b>'+esc(x.name)+'</b></td><td>'+x.full_days+'</td><td>'+x.absent+'</td><td>'+x.left+'</td><td>'+x.late+'</td><td>'+x.sick+'</td><td>'+x.application+'</td></tr>'}).join('');c.innerHTML='<div class=\"section-head\"><h2>👨‍👩‍👦 Для родителей</h2><div class=\"actions\"><input type=\"month\" id=\"parentMonth\" value=\"'+state.month+'\"><button class=\"btn secondary\" onclick=\"window.print()\">🖨️ Печать / PDF</button></div></div><div class=\"table-wrap\"><table class=\"table\"><thead><tr><th>Ученик</th><th>📅 День</th><th>❌ Пары</th><th>🚪</th><th>⏰</th><th>🤒</th><th>📝</th></tr></thead><tbody>'+rows+'</tbody></table></div>';document.getElementById('parentMonth').onchange=function(){state.month=this.value;go('parents')}}\npages.analytics=async function(c){var d=await api('/api/stats?month='+state.month);var max=Math.max.apply(null,d.rows.map(function(x){return x.absent+x.sick+x.application}).concat([1]));c.innerHTML='<div class=\"section-head\"><h2>📊 Аналитика</h2><div class=\"actions\"><input type=\"month\" id=\"statMonth\" value=\"'+state.month+'\"></div></div><div class=\"grid\">'+metric('Средняя посещаемость',d.group_percent+'%')+metric('❌ Пропусков',d.total_absent)+metric('🤒 Болезней',d.total_sick)+metric('📝 Заявлений',d.total_application)+'</div><div class=\"card\" style=\"margin-top:14px\"><h3>Нагрузка по ученикам</h3><div class=\"chart\">'+d.rows.map(function(x){var v=x.absent+x.sick+x.application;return '<div class=\"bar\" title=\"'+esc(x.name)+': '+v+'\" style=\"height:'+Math.max(3,Math.round(v/max*100))+'%\"></div>'}).join('')+'</div></div>';document.getElementById('statMonth').onchange=function(){state.month=this.value;go('analytics')}}\npages.reports=async function(c){c.innerHTML='<div class=\"section-head\"><h2>📄 Отчёты и резервные копии</h2></div><div class=\"grid\"><div class=\"card\"><h3>Excel</h3><p class=\"muted\">Полная посещаемость и сводка.</p><a class=\"btn\" style=\"display:inline-block;text-decoration:none\" href=\"/api/report.xlsx?period=all\">Скачать .xlsx</a></div><div class=\"card\"><h3>CSV</h3><p class=\"muted\">Универсальный экспорт данных.</p><a class=\"btn secondary\" style=\"display:inline-block;text-decoration:none\" href=\"/api/export.csv\">Скачать .csv</a></div><div class=\"card\"><h3>Backup JSON</h3><p class=\"muted\">Студенты, посещаемость, пары, дежурства.</p><a class=\"btn secondary\" style=\"display:inline-block;text-decoration:none\" href=\"/api/backup\">Скачать backup</a></div></div>'}\npages.online=async function(c){var d=await api('/api/online');c.innerHTML='<div class=\"section-head\"><h2>🟢 Кто в системе</h2></div><div class=\"list\">'+d.users.map(function(u){return '<div class=\"list-item\"><span>'+(u.online?'🟢':'⚪')+'</span><div><b>'+esc(u.display_name||u.login||u.telegram_user_id)+'</b><div class=\"small muted\">'+esc(u.last_seen||'нет активности')+'</div></div></div>'}).join('')+'</div>'}\npages.users=async function(c){var d=await api('/api/admin/accounts');var perms=['view_journal','edit_attendance','edit_students','edit_duty','edit_schedule','reports','manage_users','settings'];c.innerHTML='<div class=\"section-head\"><h2>👥 Пользователи и доступ</h2><div class=\"actions\"><button class=\"btn\" id=\"newAccount\">+ Аккаунт</button></div></div><div class=\"list\">'+d.accounts.map(function(u){return '<div class=\"list-item\"><div style=\"flex:1\"><b>'+esc(u.display_name||u.login||u.telegram_user_id||'Аккаунт')+'</b><div class=\"small muted\">'+esc(u.role)+' · '+(u.enabled?'активен':'отключён')+'</div></div><span class=\"pill\">'+esc(u.telegram_user_id||'без Telegram')+'</span></div>'}).join('')+'</div>';document.getElementById('newAccount').onclick=function(){modal('<h3>Новый аккаунт</h3><div class=\"field\"><input id=\"accName\" placeholder=\"Имя\"></div><div class=\"field\"><input id=\"accLogin\" placeholder=\"Логин\"></div><div class=\"field\"><input id=\"accPass\" type=\"password\" placeholder=\"Пароль\"></div><div class=\"field\"><input id=\"accTg\" placeholder=\"Telegram ID (необязательно)\"></div><div class=\"field\"><select id=\"accRole\"><option value=\"teacher\">Преподаватель</option><option value=\"viewer\">Только просмотр</option></select></div><div><b>Права</b>'+perms.map(function(p){return '<label class=\"list-item\"><input type=\"checkbox\" data-perm=\"'+p+'\" checked> '+p+'</label>'}).join('')+'</div><button class=\"btn\" id=\"saveAcc\">Создать</button>');document.getElementById('saveAcc').onclick=async function(){var ps=[].slice.call(document.querySelectorAll('[data-perm]:checked')).map(function(x){return x.dataset.perm});await api('/api/admin/accounts',{method:'POST',body:JSON.stringify({display_name:document.getElementById('accName').value,login:document.getElementById('accLogin').value,password:document.getElementById('accPass').value,telegram_user_id:document.getElementById('accTg').value,role:document.getElementById('accRole').value,permissions:ps})});closeModal();toast('Аккаунт создан');go('users')}}}\npages.audit=async function(c){var d=await api('/api/audit');c.innerHTML='<div class=\"section-head\"><h2>🛡 Журнал действий</h2></div><div class=\"table-wrap\"><table class=\"table\"><thead><tr><th>Время</th><th>Кто</th><th>Действие</th><th>Детали</th></tr></thead><tbody>'+d.rows.map(function(x){return '<tr><td>'+esc(x.created_at)+'</td><td>'+esc(x.actor_user_id||'system')+'</td><td>'+esc(x.action)+'</td><td>'+esc(x.details||'')+'</td></tr>'}).join('')+'</tbody></table></div>'}\npages.settings=async function(c){var d=await api('/api/settings');c.innerHTML='<div class=\"section-head\"><h2>⚙️ Настройки</h2></div><div class=\"card\"><div class=\"field\"><label>Название группы</label><input id=\"groupName\" value=\"'+esc(d.group_name||'Группа 102')+'\"></div><div class=\"field\"><label>Часовой пояс</label><input id=\"tz\" value=\"'+esc(d.timezone||'Europe/Chisinau')+'\"></div><button class=\"btn\" id=\"saveSettings\">Сохранить</button></div>';document.getElementById('saveSettings').onclick=async function(){await api('/api/settings',{method:'POST',body:JSON.stringify({group_name:document.getElementById('groupName').value,timezone:document.getElementById('tz').value})});toast('Настройки сохранены')}}\ndocument.getElementById('logout').onclick=async function(){await api('/api/logout',{method:'POST',body:'{}'});location.reload()};\ndocument.getElementById('tabTg').onclick=function(){this.classList.add('on');document.getElementById('tabPass').classList.remove('on');document.getElementById('tgPane').classList.remove('hidden');document.getElementById('passPane').classList.add('hidden')};\ndocument.getElementById('tabPass').onclick=function(){this.classList.add('on');document.getElementById('tabTg').classList.remove('on');document.getElementById('passPane').classList.remove('hidden');document.getElementById('tgPane').classList.add('hidden')};\ndocument.getElementById('passPane').onsubmit=async function(e){e.preventDefault();try{await api('/api/auth/password',{method:'POST',body:JSON.stringify({login:document.getElementById('login').value,password:document.getElementById('password').value})});await boot()}catch(err){document.getElementById('authMsg').textContent=err.message}};\nvar pollTimer=null;\ndocument.getElementById('startCode').onclick=async function(){try{var d=await api('/api/auth/code/start',{method:'POST',body:'{}'});document.getElementById('codeBox').classList.remove('hidden');document.getElementById('loginCode').textContent=d.code;document.getElementById('codeHint').innerHTML='Отправьте боту: <b>/weblogin '+d.code+'</b>';clearInterval(pollTimer);pollTimer=setInterval(async function(){try{var q=await api('/api/auth/code/check',{method:'POST',body:JSON.stringify({code:d.code,browser_token:d.browser_token})});if(q.ok){clearInterval(pollTimer);await boot()}}catch(e){}},2000)}catch(e){document.getElementById('authMsg').textContent=e.message}};\ndocument.getElementById('globalSearch').onkeydown=async function(e){if(e.key!=='Enter')return;var q=this.value.trim();if(!q)return;var d=await api('/api/search?q='+encodeURIComponent(q));modal('<h3>🔎 Поиск</h3><div class=\"list\">'+d.results.map(function(x){return '<div class=\"list-item\"><b>'+esc(x.title)+'</b><span class=\"muted\">'+esc(x.subtitle||'')+'</span></div>'}).join('')+'</div>')};\nasync function boot(){try{state.me=await api('/api/me');showShell()}catch(e){showAuth();var tg=window.Telegram&&window.Telegram.WebApp;if(tg&&tg.initData){try{await api('/api/auth/telegram',{method:'POST',body:JSON.stringify({initData:tg.initData})});state.me=await api('/api/me');tg.ready();tg.expand();showShell();return}catch(err){document.getElementById('authMsg').textContent=err.message}}document.getElementById('tgAuto').textContent='Вход через Telegram WebApp доступен из кнопки в боте.'}}\nboot();\n})();\n</script>\n</body>\n</html>";
+
+async function ensureColumn(env, table, column, sqlType) {
+    const info = await env.DB.prepare(`PRAGMA table_info(${table})`).all();
+    if (!(info.results || []).some(r => r.name === column)) {
+        await env.DB.prepare(`ALTER TABLE ${table} ADD COLUMN ${column} ${sqlType}`).run();
+    }
+}
+
+async function initWebDb(env) {
+    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT
+    )`).run();
+
+    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS web_login_codes (
+        code TEXT PRIMARY KEY,
+        browser_token TEXT NOT NULL,
+        telegram_user_id TEXT,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        approved_at TEXT
+    )`).run();
+
+    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS schedule_lessons (
+        weekday INTEGER NOT NULL,
+        lesson_no INTEGER NOT NULL,
+        subject TEXT NOT NULL,
+        time TEXT,
+        teacher TEXT,
+        room TEXT,
+        PRIMARY KEY(weekday, lesson_no)
+    )`).run();
+
+    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS student_notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        student_id INTEGER NOT NULL,
+        text TEXT NOT NULL,
+        created_by TEXT,
+        created_at TEXT NOT NULL
+    )`).run();
+
+    await env.DB.prepare(`CREATE TABLE IF NOT EXISTS notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        body TEXT,
+        created_at TEXT NOT NULL,
+        read_at TEXT
+    )`).run();
+
+    await ensureColumn(env, "web_accounts", "display_name", "TEXT");
+    await ensureColumn(env, "web_accounts", "password_salt", "TEXT");
+    await ensureColumn(env, "web_accounts", "permissions_json", "TEXT");
+
+    const ownerId = String(env.ADMIN_ID || "");
+    if (ownerId) {
+        await env.DB.prepare(`
+            INSERT OR IGNORE INTO web_accounts(
+                telegram_user_id, role, enabled, created_at, display_name
+            ) VALUES(?, 'owner', 1, ?, 'Владелец')
+        `).bind(ownerId, new Date().toISOString()).run();
+        await env.DB.prepare(`
+            UPDATE web_accounts SET role='owner', enabled=1
+            WHERE telegram_user_id=?
+        `).bind(ownerId).run();
+    }
+
+    const scheduleCount = await env.DB.prepare("SELECT COUNT(*) AS c FROM schedule_lessons").first();
+    if (Number(scheduleCount?.c || 0) === 0) {
+        const rows = [
+            [1,1,"Родной (русский) язык","08:30–09:50","Силаева М.К.","107"],
+            [1,2,"Математика","10:00–11:20","Савва Т.А.","201"],
+            [1,3,"Физика","12:00–13:20","Холошной П.В.","206"],
+            [2,1,"Математика","08:30–09:50","Савва Т.А.","201"],
+            [2,2,"Иностранный язык","10:00–11:20","","303/29"],
+            [2,3,"Физика","12:00–13:20","Холошной П.В.","206"],
+            [2,4,"Литература / Официальный язык","13:30–14:50","","32/11/113"],
+            [3,1,"Химия","08:30–09:50","Клименко Н.Н.","301"],
+            [3,2,"Математика","10:00–11:20","Савва Т.А.","201"],
+            [3,3,"НВП / Биология","12:00–13:20","","101/301"],
+            [3,4,"Физическая культура","13:30–14:50","Пасисниченко А.И.",""],
+            [4,1,"Слесарное дело и технические измерения","08:30–09:50","Мизернюк И.Я.","110"],
+            [4,2,"Устройство автотранспортных средств","10:00–11:20","Петренко А.А.","306"],
+            [4,3,"Охрана труда","12:00–13:20","Главацкая С.Ю.","307"],
+            [5,1,"Математика","08:30–09:50","Савва Т.А.","201"],
+            [5,2,"Физика","10:00–11:20","Холошной П.В.","206"],
+            [5,3,"Информатика и ИКТ","12:00–13:20","Шандригоз Н.Н.","305"],
+            [5,4,"Материаловедение","13:30–14:50","Петренко А.А.","306"]
+        ];
+        for (const r of rows) {
+            await env.DB.prepare(`INSERT OR IGNORE INTO schedule_lessons
+                (weekday,lesson_no,subject,time,teacher,room) VALUES(?,?,?,?,?,?)`)
+                .bind(...r).run();
+        }
+    }
+}
+
+const initDbBeforeWeb = initDb;
+initDb = async function(env) {
+    await initDbBeforeWeb(env);
+    await initWebDb(env);
+};
+
+async function rememberWebOrigin(env, origin) {
+    if (!origin || !origin.startsWith("https://")) return;
+    await env.DB.prepare(`INSERT INTO app_settings(key,value) VALUES('web_origin',?)
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value`).bind(origin).run();
+}
+
+async function getWebAppUrl(env) {
+    const r = await env.DB.prepare(`SELECT value FROM app_settings WHERE key='web_origin'`).first();
+    return (r?.value || "https://example.com") + "/app";
+}
+
+function jsonResponse(data, status=200, extraHeaders={}) {
+    return new Response(JSON.stringify(data), {
+        status,
+        headers: {
+            "content-type": "application/json; charset=UTF-8",
+            "cache-control": "no-store",
+            ...extraHeaders
+        }
+    });
+}
+
+function cookieValue(request, name) {
+    const c = request.headers.get("cookie") || "";
+    const m = c.match(new RegExp("(?:^|;\\\\s*)" + name.replace(/[.*+?^${}()|[\\]\\\\]/g,"\\\\$&") + "=([^;]+)"));
+    return m ? decodeURIComponent(m[1]) : "";
+}
+
+function randomHex(bytes=24) {
+    const a = new Uint8Array(bytes);
+    crypto.getRandomValues(a);
+    return [...a].map(x=>x.toString(16).padStart(2,"0")).join("");
+}
+
+async function sha256Hex(text) {
+    const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+    return [...new Uint8Array(d)].map(x=>x.toString(16).padStart(2,"0")).join("");
+}
+
+async function hashPassword(password, salt) {
+    const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
+    const bits = await crypto.subtle.deriveBits({
+        name:"PBKDF2", salt:new TextEncoder().encode(salt), iterations:160000, hash:"SHA-256"
+    }, key, 256);
+    return [...new Uint8Array(bits)].map(x=>x.toString(16).padStart(2,"0")).join("");
+}
+
+async function createSession(env, accountId) {
+    const raw = randomHex(32);
+    const hashed = await sha256Hex(raw);
+    const now = new Date();
+    const exp = new Date(now.getTime()+30*24*3600*1000);
+    await env.DB.prepare(`INSERT INTO web_sessions(session_id,account_id,created_at,expires_at,last_seen)
+        VALUES(?,?,?,?,?)`).bind(hashed,accountId,now.toISOString(),exp.toISOString(),now.toISOString()).run();
+    return { raw, expires: exp };
+}
+
+function sessionCookie(raw, expires) {
+    return `journal_session=${encodeURIComponent(raw)}; Path=/; HttpOnly; Secure; SameSite=Lax; Expires=${expires.toUTCString()}`;
+}
+
+async function getWebUser(request, env) {
+    const raw = cookieValue(request,"journal_session");
+    if (!raw) return null;
+    const hashed = await sha256Hex(raw);
+    const row = await env.DB.prepare(`
+        SELECT a.*, s.last_seen, s.expires_at
+        FROM web_sessions s
+        JOIN web_accounts a ON a.id=s.account_id
+        WHERE s.session_id=? AND a.enabled=1 AND s.expires_at>?
+    `).bind(hashed,new Date().toISOString()).first();
+    if (!row) return null;
+    await env.DB.prepare(`UPDATE web_sessions SET last_seen=? WHERE session_id=?`)
+        .bind(new Date().toISOString(),hashed).run();
+    return row;
+}
+
+function parsePermissions(user) {
+    try { return JSON.parse(user.permissions_json || "[]"); } catch { return []; }
+}
+
+function canWeb(user, perm) {
+    if (!user) return false;
+    if (user.role === "owner") return true;
+    const explicit = parsePermissions(user);
+    if (explicit.includes(perm)) return true;
+    if (user.role === "viewer") return ["view_journal"].includes(perm);
+    const teacher = ["view_journal","edit_attendance","edit_students","edit_duty","edit_schedule","reports"];
+    return user.role === "teacher" && teacher.includes(perm);
+}
+
+async function requireWeb(request, env, perm="view_journal") {
+    const u = await getWebUser(request, env);
+    if (!u) throw Object.assign(new Error("AUTH"),{status:401});
+    if (!canWeb(u,perm)) throw Object.assign(new Error("Нет права: "+perm),{status:403});
+    return u;
+}
+
+async function webAudit(env, actor, action, details="") {
+    await env.DB.prepare(`INSERT INTO audit_log(actor_user_id,action,details,created_at) VALUES(?,?,?,?)`)
+        .bind(String(actor?.telegram_user_id || actor?.login || actor?.id || ""), action, String(details||"").slice(0,1000), new Date().toISOString()).run();
+}
+
+async function telegramWebAppUser(initData, env) {
+    if (!initData || !env.BOT_TOKEN) return null;
+    const p = new URLSearchParams(initData);
+    const hash = p.get("hash");
+    if (!hash) return null;
+    p.delete("hash");
+    const check = [...p.entries()].sort(([a],[b])=>a.localeCompare(b)).map(([k,v])=>`${k}=${v}`).join("\n");
+    const enc = new TextEncoder();
+    const secretKeyBase = await crypto.subtle.importKey("raw", enc.encode("WebAppData"), {name:"HMAC",hash:"SHA-256"}, false, ["sign"]);
+    const secret = await crypto.subtle.sign("HMAC", secretKeyBase, enc.encode(env.BOT_TOKEN));
+    const secretKey = await crypto.subtle.importKey("raw", secret, {name:"HMAC",hash:"SHA-256"}, false, ["sign"]);
+    const signature = await crypto.subtle.sign("HMAC", secretKey, enc.encode(check));
+    const calc = [...new Uint8Array(signature)].map(x=>x.toString(16).padStart(2,"0")).join("");
+    if (calc !== hash.toLowerCase()) return null;
+    const authDate = Number(p.get("auth_date")||0);
+    if (!authDate || Math.abs(Date.now()/1000-authDate)>86400) return null;
+    try { return JSON.parse(p.get("user")||"null"); } catch { return null; }
+}
+
+async function ensureTelegramAccount(env, tg) {
+    const uid = String(tg.id);
+    const allowed = await isAdmin(env,uid);
+    if (!allowed) return null;
+    let a = await env.DB.prepare(`SELECT * FROM web_accounts WHERE telegram_user_id=?`).bind(uid).first();
+    if (!a) {
+        const role = String(uid)===String(env.ADMIN_ID) ? "owner" : "teacher";
+        const name = [tg.first_name,tg.last_name].filter(Boolean).join(" ") || tg.username || uid;
+        await env.DB.prepare(`INSERT INTO web_accounts(telegram_user_id,role,enabled,created_at,display_name)
+            VALUES(?,?,1,?,?)`).bind(uid,role,new Date().toISOString(),name).run();
+        a = await env.DB.prepare(`SELECT * FROM web_accounts WHERE telegram_user_id=?`).bind(uid).first();
+    }
+    return a;
+}
+
+function qdate(v,fallback=localDate()) {
+    return /^\d{4}-\d{2}-\d{2}$/.test(v||"") ? v : fallback;
+}
+function qmonth(v) {
+    return /^\d{4}-\d{2}$/.test(v||"") ? v : localDate().slice(0,7);
+}
+
+async function orderedStudents(env, activeOnly=true) {
+    return (await env.DB.prepare(`
+        SELECT id,name,active FROM students
+        ${activeOnly?"WHERE active=1":""}
+        ORDER BY CASE WHEN name='Кориков Денис' THEN 1 WHEN name='Гуска Александр' THEN 2 ELSE 0 END,
+                 name COLLATE NOCASE
+    `).all()).results || [];
+}
+
+async function dashboardApi(env) {
+    const date = localDate();
+    const students = await orderedStudents(env,true);
+    const daily = await env.DB.prepare(`SELECT student_id,status FROM attendance WHERE date=?`).bind(date).all();
+    const pairs = await env.DB.prepare(`SELECT student_id,status,lesson_no FROM lesson_attendance WHERE date=?`).bind(date).all();
+    const all = [...(daily.results||[]),...(pairs.results||[])];
+    const count = st => all.filter(x=>x.status===st || (st==="sick"&&x.status==="excused")).length;
+    const today = [];
+    for (const r of all.filter(x=>["absent","late","sick","excused","application","left"].includes(x.status)).slice(0,20)) {
+        const st = students.find(s=>Number(s.id)===Number(r.student_id));
+        const meta = {absent:["❌","Отсутствует"],late:["⏰","Опоздал"],sick:["🤒","Болеет"],excused:["🤒","Болеет"],application:["📝","По заявлению"],left:["🚪","Ушёл раньше"]}[r.status];
+        if(st&&meta) today.push({name:st.name,icon:meta[0],text:meta[1]+(r.lesson_no?`, ${r.lesson_no} пара`:"")});
+    }
+    const duty = (await env.DB.prepare(`SELECT s.id,s.name FROM duty d JOIN students s ON s.id=d.student_id WHERE d.date=?`).bind(date).all()).results||[];
+    return {students:students.length,absent:count("absent"),sick:count("sick"),application:count("application"),today,duty};
+}
+
+async function parentsApi(env, month) {
+    const students = await orderedStudents(env,true);
+    const pair = await env.DB.prepare(`
+        SELECT student_id,
+        SUM(status='absent') absent,
+        SUM(status='left') leftc,
+        SUM(status='late') late,
+        SUM(status IN ('sick','excused')) sick,
+        SUM(status='application') application
+        FROM lesson_attendance WHERE substr(date,1,7)=? GROUP BY student_id
+    `).bind(month).all();
+    const days = await env.DB.prepare(`
+        SELECT student_id,SUM(status='absent') full_days FROM attendance
+        WHERE substr(date,1,7)=? GROUP BY student_id
+    `).bind(month).all();
+    const pm=new Map((pair.results||[]).map(r=>[Number(r.student_id),r]));
+    const dm=new Map((days.results||[]).map(r=>[Number(r.student_id),r]));
+    return students.map(s=>{const p=pm.get(Number(s.id))||{},d=dm.get(Number(s.id))||{};return {
+        id:s.id,name:s.name,full_days:Number(d.full_days||0),absent:Number(p.absent||0),left:Number(p.leftc||0),
+        late:Number(p.late||0),sick:Number(p.sick||0),application:Number(p.application||0)
+    }});
+}
+
+async function handleWebApi(request, env, url) {
+    try {
+        const path = url.pathname;
+        const body = request.method==="GET" ? {} : await request.json().catch(()=>({}));
+
+        if (path==="/api/auth/password" && request.method==="POST") {
+            const a=await env.DB.prepare(`SELECT * FROM web_accounts WHERE lower(login)=lower(?) AND enabled=1`).bind(String(body.login||"")).first();
+            if(!a||!a.password_hash||!a.password_salt) return jsonResponse({error:"Неверный логин или пароль"},401);
+            const h=await hashPassword(String(body.password||""),a.password_salt);
+            if(h!==a.password_hash) return jsonResponse({error:"Неверный логин или пароль"},401);
+            const ses=await createSession(env,a.id);
+            await env.DB.prepare(`UPDATE web_accounts SET last_login=? WHERE id=?`).bind(new Date().toISOString(),a.id).run();
+            await webAudit(env,a,"web_login","password");
+            return jsonResponse({ok:true},200,{"set-cookie":sessionCookie(ses.raw,ses.expires)});
+        }
+
+        if (path==="/api/auth/telegram" && request.method==="POST") {
+            const tg=await telegramWebAppUser(body.initData,env);
+            if(!tg) return jsonResponse({error:"Не удалось проверить Telegram"},401);
+            const a=await ensureTelegramAccount(env,tg);
+            if(!a) return jsonResponse({error:"У вас нет доступа к журналу"},403);
+            const ses=await createSession(env,a.id);
+            await webAudit(env,a,"web_login","telegram_webapp");
+            return jsonResponse({ok:true},200,{"set-cookie":sessionCookie(ses.raw,ses.expires)});
+        }
+
+        if (path==="/api/auth/code/start" && request.method==="POST") {
+            const code=String(Math.floor(100000+Math.random()*900000));
+            const browser=randomHex(18), now=new Date(), exp=new Date(now.getTime()+5*60*1000);
+            await env.DB.prepare(`INSERT INTO web_login_codes(code,browser_token,created_at,expires_at) VALUES(?,?,?,?)`)
+                .bind(code,browser,now.toISOString(),exp.toISOString()).run();
+            return jsonResponse({code,browser_token:browser,expires_at:exp.toISOString()});
+        }
+
+        if (path==="/api/auth/code/check" && request.method==="POST") {
+            const r=await env.DB.prepare(`SELECT * FROM web_login_codes WHERE code=? AND browser_token=? AND expires_at>?`)
+                .bind(String(body.code||""),String(body.browser_token||""),new Date().toISOString()).first();
+            if(!r||!r.telegram_user_id) return jsonResponse({ok:false});
+            const a=await env.DB.prepare(`SELECT * FROM web_accounts WHERE telegram_user_id=? AND enabled=1`).bind(r.telegram_user_id).first();
+            if(!a) return jsonResponse({error:"Доступ не найден"},403);
+            const ses=await createSession(env,a.id);
+            await env.DB.prepare(`DELETE FROM web_login_codes WHERE code=?`).bind(r.code).run();
+            await webAudit(env,a,"web_login","telegram_code");
+            return jsonResponse({ok:true},200,{"set-cookie":sessionCookie(ses.raw,ses.expires)});
+        }
+
+        if (path==="/api/logout" && request.method==="POST") {
+            const raw=cookieValue(request,"journal_session");
+            if(raw){const h=await sha256Hex(raw);await env.DB.prepare(`DELETE FROM web_sessions WHERE session_id=?`).bind(h).run()}
+            return jsonResponse({ok:true},200,{"set-cookie":"journal_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0"});
+        }
+
+        const user=await requireWeb(request,env,"view_journal");
+
+        if (path==="/api/me") return jsonResponse({id:user.id,display_name:user.display_name,login:user.login,role:user.role,telegram_user_id:user.telegram_user_id,permissions:parsePermissions(user)});
+
+        if (path==="/api/dashboard") return jsonResponse(await dashboardApi(env));
+
+        if (path==="/api/students" && request.method==="GET") return jsonResponse({students:await orderedStudents(env,true)});
+        if (path==="/api/students" && request.method==="POST") {
+            if(!canWeb(user,"edit_students")) return jsonResponse({error:"Нет права"},403);
+            const name=String(body.name||"").trim(); if(name.length<3) return jsonResponse({error:"Введите имя"},400);
+            await env.DB.prepare(`INSERT INTO students(name,active) VALUES(?,1) ON CONFLICT(name) DO UPDATE SET active=1`).bind(name).run();
+            await webAudit(env,user,"student_add",name); return jsonResponse({ok:true});
+        }
+
+        if (path.startsWith("/api/student/")) {
+            const id=Number(path.split("/").pop());
+            const student=await env.DB.prepare(`SELECT * FROM students WHERE id=?`).bind(id).first();
+            if(!student) return jsonResponse({error:"Ученик не найден"},404);
+            const rows=(await env.DB.prepare(`SELECT date,status,NULL lesson_no FROM attendance WHERE student_id=?
+                UNION ALL SELECT date,status,lesson_no FROM lesson_attendance WHERE student_id=?
+                ORDER BY date DESC LIMIT 100`).bind(id,id).all()).results||[];
+            const absent=rows.filter(x=>x.status==="absent").length,sick=rows.filter(x=>["sick","excused"].includes(x.status)).length,application=rows.filter(x=>x.status==="application").length;
+            const counted=rows.filter(x=>["present","absent","late"].includes(x.status)).length,present=rows.filter(x=>["present","late"].includes(x.status)).length;
+            return jsonResponse({student,absent,sick,application,attendance_percent:counted?Math.round(present/counted*100):0,events:rows.slice(0,30)});
+        }
+
+        if (path==="/api/attendance" && request.method==="GET") {
+            const date=qdate(url.searchParams.get("date"));
+            const rows=(await env.DB.prepare(`SELECT student_id,status FROM attendance WHERE date=?`).bind(date).all()).results||[];
+            return jsonResponse({date,statuses:Object.fromEntries(rows.map(r=>[String(r.student_id),r.status]))});
+        }
+        if (path==="/api/attendance" && request.method==="POST") {
+            if(!canWeb(user,"edit_attendance")) return jsonResponse({error:"Нет права"},403);
+            const date=qdate(body.date),sid=Number(body.student_id),st=String(body.status||"none");
+            if(st==="none") await env.DB.prepare(`DELETE FROM attendance WHERE date=? AND student_id=?`).bind(date,sid).run();
+            else await env.DB.prepare(`INSERT INTO attendance(date,student_id,status) VALUES(?,?,?) ON CONFLICT(date,student_id) DO UPDATE SET status=excluded.status`).bind(date,sid,st).run();
+            await webAudit(env,user,"attendance_set",`${date} student=${sid} status=${st}`); return jsonResponse({ok:true});
+        }
+        if (path==="/api/attendance/all-present" && request.method==="POST") {
+            if(!canWeb(user,"edit_attendance")) return jsonResponse({error:"Нет права"},403);
+            const date=qdate(body.date); for(const s of await orderedStudents(env,true)){await env.DB.prepare(`INSERT INTO attendance(date,student_id,status) VALUES(?,?,'present') ON CONFLICT(date,student_id) DO UPDATE SET status='present'`).bind(date,s.id).run()}
+            await webAudit(env,user,"attendance_all_present",date); return jsonResponse({ok:true});
+        }
+
+        if (path==="/api/pairs" && request.method==="GET") {
+            const date=qdate(url.searchParams.get("date")),lessons=lessonsCountForDate(date);
+            const rows=(await env.DB.prepare(`SELECT lesson_no,student_id,status FROM lesson_attendance WHERE date=?`).bind(date).all()).results||[];
+            const statuses={}; for(const r of rows){(statuses[String(r.lesson_no)] ||= {})[String(r.student_id)]=r.status}
+            return jsonResponse({date,lessons,statuses});
+        }
+        if (path==="/api/pairs" && request.method==="POST") {
+            if(!canWeb(user,"edit_attendance")) return jsonResponse({error:"Нет права"},403);
+            const date=qdate(body.date),lesson=Number(body.lesson_no),sid=Number(body.student_id),st=String(body.status||"none");
+            if(st==="none") await env.DB.prepare(`DELETE FROM lesson_attendance WHERE date=? AND lesson_no=? AND student_id=?`).bind(date,lesson,sid).run();
+            else await env.DB.prepare(`INSERT INTO lesson_attendance(date,lesson_no,student_id,status) VALUES(?,?,?,?) ON CONFLICT(date,lesson_no,student_id) DO UPDATE SET status=excluded.status`).bind(date,lesson,sid,st).run();
+            await webAudit(env,user,"pair_attendance_set",`${date} pair=${lesson} student=${sid} status=${st}`); return jsonResponse({ok:true});
+        }
+
+        if (path==="/api/calendar") {
+            const month=qmonth(url.searchParams.get("month"));
+            const rows=(await env.DB.prepare(`SELECT date,
+                SUM(status='absent') absent,SUM(status IN ('sick','excused')) sick,SUM(status='application') application
+                FROM lesson_attendance WHERE substr(date,1,7)=? GROUP BY date`).bind(month).all()).results||[];
+            return jsonResponse({month,days:Object.fromEntries(rows.map(r=>[r.date,{absent:Number(r.absent||0),sick:Number(r.sick||0),application:Number(r.application||0)}]))});
+        }
+
+        if (path==="/api/health") {
+            const month=qmonth(url.searchParams.get("month")),students=await orderedStudents(env,true);
+            const rows=(await env.DB.prepare(`SELECT student_id,SUM(status IN ('sick','excused')) sick,SUM(status='application') application
+                FROM lesson_attendance WHERE substr(date,1,7)=? GROUP BY student_id`).bind(month).all()).results||[];
+            const m=new Map(rows.map(r=>[Number(r.student_id),r])); const out=students.map(s=>{const r=m.get(Number(s.id))||{};return {id:s.id,name:s.name,sick:Number(r.sick||0),application:Number(r.application||0)}});
+            return jsonResponse({month,rows:out,sick_total:out.reduce((a,x)=>a+x.sick,0),application_total:out.reduce((a,x)=>a+x.application,0)});
+        }
+
+        if (path==="/api/duty" && request.method==="GET") {
+            const date=qdate(url.searchParams.get("date")); const students=(await env.DB.prepare(`SELECT s.id,s.name FROM duty d JOIN students s ON s.id=d.student_id WHERE d.date=? ORDER BY s.name`).bind(date).all()).results||[];
+            return jsonResponse({date,students});
+        }
+        if (path==="/api/duty" && request.method==="POST") {
+            if(!canWeb(user,"edit_duty")) return jsonResponse({error:"Нет права"},403);
+            const date=qdate(body.date),ids=Array.isArray(body.student_ids)?body.student_ids.map(Number):[];
+            await env.DB.prepare(`DELETE FROM duty WHERE date=?`).bind(date).run();
+            for(const id of ids) await env.DB.prepare(`INSERT OR IGNORE INTO duty(date,student_id) VALUES(?,?)`).bind(date,id).run();
+            await webAudit(env,user,"duty_set",`${date}: ${ids.join(",")}`); return jsonResponse({ok:true});
+        }
+
+        if (path==="/api/schedule" && request.method==="GET") {
+            const rows=(await env.DB.prepare(`SELECT * FROM schedule_lessons ORDER BY weekday,lesson_no`).all()).results||[]; const days={};
+            for(const r of rows)(days[String(r.weekday)] ||= []).push(r); return jsonResponse({days});
+        }
+        if (path==="/api/schedule" && request.method==="POST") {
+            if(!canWeb(user,"edit_schedule")) return jsonResponse({error:"Нет права"},403);
+            await env.DB.prepare(`INSERT INTO schedule_lessons(weekday,lesson_no,subject,time,teacher,room) VALUES(?,?,?,?,?,?)
+                ON CONFLICT(weekday,lesson_no) DO UPDATE SET subject=excluded.subject,time=excluded.time,teacher=excluded.teacher,room=excluded.room`)
+                .bind(Number(body.weekday),Number(body.lesson_no),String(body.subject||""),String(body.time||""),String(body.teacher||""),String(body.room||"")).run();
+            await webAudit(env,user,"schedule_set",`day=${body.weekday} lesson=${body.lesson_no}`); return jsonResponse({ok:true});
+        }
+
+        if (path==="/api/parents") return jsonResponse({month:qmonth(url.searchParams.get("month")),rows:await parentsApi(env,qmonth(url.searchParams.get("month")))});
+
+        if (path==="/api/stats") {
+            const month=qmonth(url.searchParams.get("month")),rows=await parentsApi(env,month);
+            const detail=[]; for(const r of rows){const cnt=await env.DB.prepare(`SELECT
+                SUM(status='present') present,SUM(status='late') late,SUM(status='absent') absent
+                FROM lesson_attendance WHERE student_id=? AND substr(date,1,7)=?`).bind(r.id,month).first();
+                const counted=Number(cnt?.present||0)+Number(cnt?.late||0)+Number(cnt?.absent||0);
+                detail.push({...r,percent:counted?Math.round((Number(cnt?.present||0)+Number(cnt?.late||0))/counted*100):0});
+            }
+            const gp=detail.length?Math.round(detail.reduce((a,x)=>a+x.percent,0)/detail.length):0;
+            return jsonResponse({month,rows:detail,group_percent:gp,total_absent:detail.reduce((a,x)=>a+x.absent,0),total_sick:detail.reduce((a,x)=>a+x.sick,0),total_application:detail.reduce((a,x)=>a+x.application,0)});
+        }
+
+        if (path==="/api/online") {
+            const rows=(await env.DB.prepare(`SELECT a.display_name,a.login,a.telegram_user_id,MAX(s.last_seen) last_seen
+                FROM web_accounts a LEFT JOIN web_sessions s ON s.account_id=a.id WHERE a.enabled=1 GROUP BY a.id ORDER BY last_seen DESC`).all()).results||[];
+            const now=Date.now(); return jsonResponse({users:rows.map(r=>({...r,online:r.last_seen&&(now-new Date(r.last_seen).getTime()<5*60*1000)}))});
+        }
+
+        if (path==="/api/admin/accounts" && request.method==="GET") {
+            if(user.role!=="owner") return jsonResponse({error:"Только владелец"},403);
+            return jsonResponse({accounts:(await env.DB.prepare(`SELECT id,telegram_user_id,login,role,enabled,display_name,last_login,permissions_json FROM web_accounts ORDER BY id`).all()).results||[]});
+        }
+        if (path==="/api/admin/accounts" && request.method==="POST") {
+            if(user.role!=="owner") return jsonResponse({error:"Только владелец"},403);
+            const login=String(body.login||"").trim()||null,pass=String(body.password||""),tg=String(body.telegram_user_id||"").trim()||null;
+            if(!login&&!tg) return jsonResponse({error:"Нужен логин или Telegram ID"},400);
+            let salt=null,hash=null; if(pass){salt=randomHex(16);hash=await hashPassword(pass,salt)}
+            await env.DB.prepare(`INSERT INTO web_accounts(telegram_user_id,login,password_hash,password_salt,role,enabled,created_at,display_name,permissions_json)
+                VALUES(?,?,?,?,?,1,?,?,?)`).bind(tg,login,hash,salt,String(body.role||"teacher"),new Date().toISOString(),String(body.display_name||""),JSON.stringify(body.permissions||[])).run();
+            await webAudit(env,user,"account_create",login||tg); return jsonResponse({ok:true});
+        }
+
+        if (path==="/api/audit") {
+            if(user.role!=="owner") return jsonResponse({error:"Только владелец"},403);
+            return jsonResponse({rows:(await env.DB.prepare(`SELECT * FROM audit_log ORDER BY id DESC LIMIT 300`).all()).results||[]});
+        }
+
+        if (path==="/api/settings" && request.method==="GET") {
+            const rows=(await env.DB.prepare(`SELECT key,value FROM app_settings WHERE key IN ('group_name','timezone')`).all()).results||[];
+            return jsonResponse(Object.fromEntries(rows.map(r=>[r.key,r.value])));
+        }
+        if (path==="/api/settings" && request.method==="POST") {
+            if(!canWeb(user,"settings")) return jsonResponse({error:"Нет права"},403);
+            for(const k of ["group_name","timezone"]) if(body[k]!=null) await env.DB.prepare(`INSERT INTO app_settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`).bind(k,String(body[k])).run();
+            await webAudit(env,user,"settings_update",JSON.stringify(body)); return jsonResponse({ok:true});
+        }
+
+        if (path==="/api/search") {
+            const q="%"+String(url.searchParams.get("q")||"").slice(0,60)+"%";
+            const students=(await env.DB.prepare(`SELECT id,name FROM students WHERE name LIKE ? ORDER BY name LIMIT 20`).bind(q).all()).results||[];
+            const audit=user.role==="owner"?(await env.DB.prepare(`SELECT id,action,details FROM audit_log WHERE action LIKE ? OR details LIKE ? ORDER BY id DESC LIMIT 20`).bind(q,q).all()).results||[]:[];
+            return jsonResponse({results:[...students.map(x=>({title:x.name,subtitle:"Ученик"})),...audit.map(x=>({title:x.action,subtitle:x.details}))]});
+        }
+
+        if (path==="/api/export.csv") {
+            if(!canWeb(user,"reports")) return jsonResponse({error:"Нет права"},403);
+            const rows=(await env.DB.prepare(`SELECT la.date,la.lesson_no,s.name,la.status FROM lesson_attendance la JOIN students s ON s.id=la.student_id ORDER BY la.date,la.lesson_no,s.name`).all()).results||[];
+            const csv="date;lesson;student;status\n"+rows.map(r=>[r.date,r.lesson_no,r.name,r.status].map(v=>`"${String(v??"").replaceAll('"','""')}"`).join(";")).join("\n");
+            return new Response("\ufeff"+csv,{headers:{"content-type":"text/csv; charset=UTF-8","content-disposition":"attachment; filename=journal102.csv"}});
+        }
+
+        if (path==="/api/backup") {
+            if(!canWeb(user,"reports")) return jsonResponse({error:"Нет права"},403);
+            const tables=["students","attendance","lesson_attendance","duty","schedule_lessons"];
+            const data={created_at:new Date().toISOString(),tables:{}};
+            for(const t of tables)data.tables[t]=(await env.DB.prepare(`SELECT * FROM ${t}`).all()).results||[];
+            return new Response(JSON.stringify(data,null,2),{headers:{"content-type":"application/json; charset=UTF-8","content-disposition":"attachment; filename=journal102_backup.json"}});
+        }
+
+        if (path==="/api/report.xlsx") {
+            if(!canWeb(user,"reports")) return jsonResponse({error:"Нет права"},403);
+            const period=url.searchParams.get("period")||"all"; const r=await createExcelReport(env,period);
+            return new Response(r.buffer,{headers:{"content-type":"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet","content-disposition":`attachment; filename="${r.filename}"`}});
+        }
+
+        return jsonResponse({error:"API route not found"},404);
+    } catch(e) {
+        if(e?.status) return jsonResponse({error:e.message==="AUTH"?"Нужен вход":e.message},e.status);
+        console.error("Web API:",e); return jsonResponse({error:String(e?.message||e)},500);
+    }
+}
+
+// Telegram command used for direct browser Telegram login.
+const handleMessageBeforeWebLogin = handleMessage;
+handleMessage = async function(message, env) {
+    const text = String(message?.text || "").trim();
+    const m = text.match(/^\/weblogin(?:@\w+)?\s+(\d{6})$/i);
+    if (m && message?.from) {
+        const uid = String(message.from.id);
+        if (!(await isAdmin(env, uid))) {
+            await sendMessage(env, message.chat.id, "🔒 У вас нет доступа к веб-журналу.");
+            return;
+        }
+        const row = await env.DB.prepare(`SELECT * FROM web_login_codes WHERE code=? AND expires_at>?`)
+            .bind(m[1], new Date().toISOString()).first();
+        if (!row) {
+            await sendMessage(env, message.chat.id, "⌛ Код не найден или уже истёк. Получите новый код на сайте.");
+            return;
+        }
+        await ensureTelegramAccount(env, message.from);
+        await env.DB.prepare(`UPDATE web_login_codes SET telegram_user_id=?,approved_at=? WHERE code=?`)
+            .bind(uid,new Date().toISOString(),m[1]).run();
+        await sendMessage(env, message.chat.id, "✅ Вход подтверждён. Вернитесь на сайт — он откроется автоматически.");
+        return;
+    }
+    return handleMessageBeforeWebLogin(message, env);
 };
