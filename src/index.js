@@ -954,10 +954,17 @@ async function showHistory(env, chatId, messageId) {
 
         SUM(
           CASE
-            WHEN a.status = 'excused'
+            WHEN status IN ('excused', 'sick')
             THEN 1 ELSE 0
           END
-        ) AS excused,
+        ) AS sick,
+
+        SUM(
+          CASE
+            WHEN status = 'application'
+            THEN 1 ELSE 0
+          END
+        ) AS application,
 
         COUNT(*) AS marked
 
@@ -992,7 +999,7 @@ async function showHistory(env, chatId, messageId) {
 ✅ ${Number(day.present || 0)}
    ❌ ${Number(day.absent || 0)}
    ⏰ ${Number(day.late || 0)}
-   🏥 ${Number(day.excused || 0)}`;
+   🤒 ${Number(day.sick || day.excused || 0)}   📝 ${Number(day.application || 0)}`;
             keyboard.push([
                 {
                     text: `📅 ${formatDateShort(date)} • открыть`,
@@ -1186,10 +1193,17 @@ async function showStudentCard(env, chatId, messageId, studentId) {
 
         SUM(
           CASE
-            WHEN status = 'excused'
+            WHEN status IN ('excused', 'sick')
             THEN 1 ELSE 0
           END
-        ) AS excused,
+        ) AS sick,
+
+        SUM(
+          CASE
+            WHEN status = 'application'
+            THEN 1 ELSE 0
+          END
+        ) AS application,
 
         COUNT(*) AS total
 
@@ -1255,7 +1269,8 @@ async function showStudentCard(env, chatId, messageId, studentId) {
 ✅ Присутствовал: <b>${present}</b>
 ❌ Отсутствовал: <b>${absent}</b>
 ⏰ Опоздал: <b>${late}</b>
-🤒 Болеет: <b>${excused}</b>
+🤒 Болеет: <b>${sick}</b>
+📝 По заявлению: <b>${application}</b>
 
 📈 Посещаемость: <b>${attendancePercent}%</b>
 
@@ -2036,10 +2051,17 @@ async function showGroupStats(env, chatId, messageId, period) {
 
         SUM(
           CASE
-            WHEN a.status = 'excused'
+            WHEN status IN ('excused', 'sick')
             THEN 1 ELSE 0
           END
-        ) AS excused
+        ) AS sick,
+
+        SUM(
+          CASE
+            WHEN status = 'application'
+            THEN 1 ELSE 0
+          END
+        ) AS application
 
       FROM students s
 
@@ -2091,7 +2113,7 @@ async function showGroupStats(env, chatId, messageId, period) {
             : 0;
         text +=
             `\n\n👤 <b>${escapeHtml(student.name)}</b>
-✅ ${present}  ❌ ${absent}  ⏰ ${late}  🏥 ${excused}
+✅ ${present}  ❌ ${absent}  ⏰ ${late}  🤒 ${excused}
 📈 ${percent}%`;
     }
     text +=
@@ -2189,10 +2211,17 @@ async function showStudentPeriodStats(env, chatId, messageId, studentId, period)
 
         SUM(
           CASE
-            WHEN status = 'excused'
+            WHEN status IN ('excused', 'sick')
             THEN 1 ELSE 0
           END
-        ) AS excused
+        ) AS sick,
+
+        SUM(
+          CASE
+            WHEN status = 'application'
+            THEN 1 ELSE 0
+          END
+        ) AS application
 
       FROM attendance
 
@@ -2224,7 +2253,8 @@ async function showStudentPeriodStats(env, chatId, messageId, studentId, period)
 ✅ Присутствовал: <b>${present}</b>
 ❌ Отсутствовал: <b>${absent}</b>
 ⏰ Опоздал: <b>${late}</b>
-🤒 Болеет: <b>${excused}</b>
+🤒 Болеет: <b>${sick}</b>
+📝 По заявлению: <b>${application}</b>
 
 📈 Посещаемость: <b>${percent}%</b>`, {
         inline_keyboard: [
@@ -2670,7 +2700,8 @@ async function showMainMenu(env, chatId, messageId = null) {
 ✅ Есть: <b>${present}</b>
 ❌ Нет: <b>${absent}</b>
 ⏰ Опоздали: <b>${late}</b>
-🤒 Болеет: <b>${excused}</b>
+🤒 Болеет: <b>${sick}</b>
+📝 По заявлению: <b>${application}</b>
 
 ⚠️ Не отмечено: <b>${unmarked}</b>
 
@@ -2891,11 +2922,18 @@ async function createExcelReport(env, period) {
           ) AS late,
 
           SUM(
-            CASE
-              WHEN a.status = 'excused'
-              THEN 1 ELSE 0
-            END
-          ) AS excused
+          CASE
+            WHEN status IN ('excused', 'sick')
+            THEN 1 ELSE 0
+          END
+        ) AS sick,
+
+        SUM(
+          CASE
+            WHEN status = 'application'
+            THEN 1 ELSE 0
+          END
+        ) AS application
 
         FROM students s
 
@@ -2947,11 +2985,18 @@ async function createExcelReport(env, period) {
           ) AS late,
 
           SUM(
-            CASE
-              WHEN a.status = 'excused'
-              THEN 1 ELSE 0
-            END
-          ) AS excused
+          CASE
+            WHEN status IN ('excused', 'sick')
+            THEN 1 ELSE 0
+          END
+        ) AS sick,
+
+        SUM(
+          CASE
+            WHEN status = 'application'
+            THEN 1 ELSE 0
+          END
+        ) AS application
 
         FROM students s
 
@@ -3014,7 +3059,7 @@ async function createExcelReport(env, period) {
             "Присутствовал": present,
             "Отсутствовал": absent,
             "Опоздал": late,
-            "Уважительно": excused,
+            "Болеет": excused,
             "Посещаемость %": percent,
             "Дежурств": Number(dutyResult?.count || 0)
         });
@@ -3371,7 +3416,7 @@ function pairStatusEmoji(status) {
         present: "✅",
         absent: "❌",
         late: "⏰",
-        excused: "🏥",
+        excused: "🤒",
         left: "🚪",
         none: "➖"
     };
@@ -3415,7 +3460,7 @@ async function showPairsDay(env, chatId, messageId, date) {
 ✅ был
 ❌ не был
 ⏰ опоздал
-🏥 уважительно
+🤒 болеет
 🚪 ушёл
 ➖ не отмечено`;
     const keyboard = [];
@@ -3905,11 +3950,17 @@ showMainMenu =
 
         SUM(
           CASE
-            WHEN status = 'excused'
-            THEN 1
-            ELSE 0
+            WHEN status IN ('excused', 'sick')
+            THEN 1 ELSE 0
           END
-        ) AS excused_count
+        ) AS sick,
+
+        SUM(
+          CASE
+            WHEN status = 'application'
+            THEN 1 ELSE 0
+          END
+        ) AS application_count
 
       FROM lesson_attendance
 
@@ -3935,7 +3986,7 @@ showMainMenu =
                 const late = Number(row.late_count || 0);
                 const excused = Number(row.excused_count || 0);
                 text +=
-                    `${escapeHtml(parentShortName(student.name))}  ❌${absent} 🚪${left} ⏰${late} 🏥${excused}
+                    `${escapeHtml(parentShortName(student.name))}  ❌${absent} 🚪${left} ⏰${late} 🤒${excused}
 `;
             }
             text +=
@@ -3944,7 +3995,7 @@ showMainMenu =
 ❌ пропущено пар
 🚪 ушёл раньше
 ⏰ опоздания
-🏥 уважительно`;
+🤒 болеет`;
             await editOrSend(env, chatId, messageId, text, {
                 inline_keyboard: [
                     [
@@ -4070,7 +4121,8 @@ showMainMenu =
 ❌ Пропущено пар: <b>${absent}</b>
 🚪 Ушёл раньше: <b>${left}</b>
 ⏰ Опозданий: <b>${late}</b>
-🤒 Болеет: <b>${excused}</b>
+🤒 Болеет: <b>${sick}</b>
+📝 По заявлению: <b>${application}</b>
 ━━━━━━━━━━━━━━`;
             if (!rows.length) {
                 text +=
@@ -4099,7 +4151,7 @@ showMainMenu =
                     }
                     if (row.status === "excused") {
                         text +=
-                            `\n${dateText} — 🏥 уважительно, ${row.lesson_no}-я пара`;
+                            `\n${dateText} — 🤒 болеет, ${row.lesson_no}-я пара`;
                     }
                 }
             }
@@ -4242,9 +4294,18 @@ showMainMenu =
           ) AS late_count,
 
           SUM(
-            CASE WHEN status = 'excused'
-            THEN 1 ELSE 0 END
-          ) AS excused_count
+          CASE
+            WHEN status IN ('excused', 'sick')
+            THEN 1 ELSE 0
+          END
+        ) AS sick,
+
+        SUM(
+          CASE
+            WHEN status = 'application'
+            THEN 1 ELSE 0
+          END
+        ) AS application_count
 
         FROM lesson_attendance
 
@@ -4277,7 +4338,7 @@ showMainMenu =
                         `${String(late).padStart(2)}  ` +
                         `${String(excused).padStart(2)}`);
                 }
-                const table = `Фамилия            ❌  🚪  ⏰  🏥
+                const table = `Фамилия            ❌  🚪  ⏰  🤒
 ────────────────────────────
 ${lines.join("\n")}
 ────────────────────────────`;
@@ -4572,7 +4633,8 @@ async function showParentStudentV4(env, chatId, messageId, month, studentId) {
 ❌ Пропущено пар: <b>${absent}</b>
 🚪 Ушёл раньше: <b>${left}</b>
 ⏰ Опозданий: <b>${late}</b>
-🤒 Болеет: <b>${excused}</b>
+🤒 Болеет: <b>${sick}</b>
+📝 По заявлению: <b>${application}</b>
 ━━━━━━━━━━━━━━`;
 
     if (!fullDays.length && !rows.length) {
@@ -4600,7 +4662,7 @@ async function showParentStudentV4(env, chatId, messageId, month, studentId) {
             } else if (row.status === "late") {
                 eventText = `⏰ опоздал на ${row.lesson_no}-ю пару`;
             } else if (row.status === "excused") {
-                eventText = `🏥 уважительно, ${row.lesson_no}-я пара`;
+                eventText = `🤒 болеет, ${row.lesson_no}-я пара`;
             }
 
             events.push({
