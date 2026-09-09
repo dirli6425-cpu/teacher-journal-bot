@@ -5386,6 +5386,52 @@ async function handleWebApi(request, env, url) {
             return jsonResponse({ok:true});
         }
 
+
+        if (path==="/api/admin/accounts/update" && request.method==="POST") {
+            if(user.role!=="owner") return jsonResponse({error:"Только владелец"},403);
+            const id=Number(body.id);
+            const target=await env.DB.prepare(`SELECT * FROM web_accounts WHERE id=?`).bind(id).first();
+            if(!target) return jsonResponse({error:"Пользователь не найден"},404);
+            const displayName=String(body.display_name??target.display_name??"").trim();
+            const role=target.role==="owner" ? "owner" : (["teacher","viewer"].includes(String(body.role))?String(body.role):target.role);
+            const tg=String(body.telegram_user_id??target.telegram_user_id??"").trim()||null;
+            const perms=Array.isArray(body.permissions)?body.permissions:JSON.parse(target.permissions_json||"[]");
+            if(tg && String(tg)!==String(target.telegram_user_id||"")){
+                const te=await env.DB.prepare(`SELECT id FROM web_accounts WHERE telegram_user_id=? AND id<>?`).bind(tg,id).first();
+                if(te)return jsonResponse({error:"Этот Telegram ID уже привязан"},409);
+            }
+            await env.DB.prepare(`UPDATE web_accounts SET display_name=?,role=?,telegram_user_id=?,permissions_json=? WHERE id=?`)
+                .bind(displayName,role,tg,JSON.stringify(perms),id).run();
+            await webAudit(env,user,"account_update",String(id));
+            return jsonResponse({ok:true});
+        }
+
+        if (path==="/api/admin/accounts/password" && request.method==="POST") {
+            if(user.role!=="owner") return jsonResponse({error:"Только владелец"},403);
+            const id=Number(body.id), pass=String(body.password||"");
+            if(pass.length<8)return jsonResponse({error:"Пароль должен быть минимум 8 символов"},400);
+            const target=await env.DB.prepare(`SELECT id FROM web_accounts WHERE id=?`).bind(id).first();
+            if(!target)return jsonResponse({error:"Пользователь не найден"},404);
+            const salt=randomHex(16),hash=await hashPassword(pass,salt);
+            await env.DB.prepare(`UPDATE web_accounts SET password_salt=?,password_hash=? WHERE id=?`).bind(salt,hash,id).run();
+            await env.DB.prepare(`DELETE FROM web_sessions WHERE account_id=?`).bind(id).run();
+            await webAudit(env,user,"account_password",String(id));
+            return jsonResponse({ok:true});
+        }
+
+        if (path==="/api/admin/accounts/delete" && request.method==="POST") {
+            if(user.role!=="owner") return jsonResponse({error:"Только владелец"},403);
+            const id=Number(body.id);
+            const target=await env.DB.prepare(`SELECT * FROM web_accounts WHERE id=?`).bind(id).first();
+            if(!target)return jsonResponse({error:"Пользователь не найден"},404);
+            if(target.role==="owner")return jsonResponse({error:"Владельца удалить нельзя"},400);
+            await env.DB.prepare(`DELETE FROM web_sessions WHERE account_id=?`).bind(id).run();
+            try{await env.DB.prepare(`DELETE FROM web_permissions WHERE account_id=?`).bind(id).run();}catch(_){}
+            await env.DB.prepare(`DELETE FROM web_accounts WHERE id=?`).bind(id).run();
+            await webAudit(env,user,"account_delete",String(id));
+            return jsonResponse({ok:true});
+        }
+
         if (path==="/api/audit") {
             if(user.role!=="owner") return jsonResponse({error:"Только владелец"},403);
             return jsonResponse({rows:(await env.DB.prepare(`SELECT * FROM audit_log ORDER BY id DESC LIMIT 300`).all()).results||[]});
