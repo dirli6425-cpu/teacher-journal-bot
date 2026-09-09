@@ -3432,6 +3432,8 @@ function pairStatusEmoji(status) {
         present: "✅",
         absent: "❌",
         late: "⏰",
+        sick: "🤒",
+        application: "📝",
         excused: "🤒",
         left: "🚪",
         none: "➖"
@@ -3477,6 +3479,7 @@ async function showPairsDay(env, chatId, messageId, date) {
 ❌ не был
 ⏰ опоздал
 🤒 болеет
+📝 по заявлению
 🚪 ушёл
 ➖ не отмечено`;
     const keyboard = [];
