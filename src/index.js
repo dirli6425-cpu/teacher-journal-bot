@@ -114,6 +114,48 @@ async function initDb(env) {
       added_at TEXT NOT NULL
     )
   `).run();
+    await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS web_accounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      telegram_user_id TEXT UNIQUE,
+      login TEXT UNIQUE,
+      password_hash TEXT,
+      role TEXT NOT NULL DEFAULT 'teacher',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      last_login TEXT
+    )
+  `).run();
+
+    await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS web_permissions (
+      account_id INTEGER NOT NULL,
+      permission TEXT NOT NULL,
+      allowed INTEGER NOT NULL DEFAULT 1,
+      PRIMARY KEY(account_id, permission)
+    )
+  `).run();
+
+    await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS web_sessions (
+      session_id TEXT PRIMARY KEY,
+      account_id INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      last_seen TEXT
+    )
+  `).run();
+
+    await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      actor_user_id TEXT,
+      action TEXT NOT NULL,
+      details TEXT,
+      created_at TEXT NOT NULL
+    )
+  `).run();
+
     const studentCount = await env.DB.prepare(`
       SELECT COUNT(*) AS count
       FROM students
@@ -332,6 +374,30 @@ async function handleCallback(q, env) {
         await showMainMenu(env, chatId, messageId);
         return;
     }
+    if (data === "web_dev") {
+        await editOrSend(env, chatId, messageId, `🌐 <b>ВЕБ-ВЕРСИЯ</b>
+
+🚧 <b>В разработке</b>
+
+Готовим:
+• вход через Telegram;
+• резервный вход по логину и паролю;
+• права доступа;
+• кто в сети;
+• журнал и отчёты на сайте.
+
+Сайт будет работать с той же базой, что и бот.`, {
+            inline_keyboard: [
+                [
+                    {
+                        text: "⬅️ Главное меню",
+                        callback_data: "main"
+                    }
+                ]
+            ]
+        });
+        return;
+    }
     if (data === "attendance") {
         await showAttendance(env, chatId, messageId, localDate());
         return;
@@ -497,7 +563,8 @@ async function showAttendance(env, chatId, messageId, date) {
     let present = 0;
     let absent = 0;
     let late = 0;
-    let excused = 0;
+    let sick = 0;
+    let application = 0;
     let unmarked = 0;
     for (const student of students) {
         const status = statusMap.get(Number(student.id));
@@ -510,8 +577,11 @@ async function showAttendance(env, chatId, messageId, date) {
         else if (status === "late") {
             late++;
         }
-        else if (status === "excused") {
-            excused++;
+        else if (status === "sick" || status === "excused") {
+            sick++;
+        }
+        else if (status === "application") {
+            application++;
         }
         else {
             unmarked++;
@@ -594,7 +664,8 @@ async function showAttendance(env, chatId, messageId, date) {
 ✅ Есть: <b>${present}</b>
 ❌ Нет: <b>${absent}</b>
 ⏰ Опоздали: <b>${late}</b>
-🏥 Уважительно: <b>${excused}</b>
+🤒 Болеет: <b>${sick}</b>
+📝 По заявлению: <b>${application}</b>
 ➖ Не отмечено: <b>${unmarked}</b>
 
 👥 Всего: <b>${students.length}</b>
@@ -603,7 +674,7 @@ async function showAttendance(env, chatId, messageId, date) {
 
 Нажимайте на студента для смены статуса:
 
-➖ → ✅ → ❌ → ⏰ → 🏥 → ➖`;
+➖ → ✅ → ❌ → ⏰ → 🤒 → 📝 → ➖`;
     await editOrSend(env, chatId, messageId, text, {
         inline_keyboard: keyboard
     });
@@ -627,8 +698,10 @@ async function cycleAttendance(env, date, studentId) {
         none: "present",
         present: "absent",
         absent: "late",
-        late: "excused",
-        excused: "none"
+        late: "sick",
+        sick: "application",
+        application: "none",
+        excused: "sick"
     }[oldStatus] ||
         "present";
     if (nextStatus === "none") {
@@ -688,13 +761,19 @@ async function showMissing(env, chatId, messageId, date) {
         s.active = 1
 
       ORDER BY
+        CASE
+          WHEN s.name = 'Кориков Денис' THEN 1
+          WHEN s.name = 'Гуска Александр' THEN 2
+          ELSE 0
+        END,
         s.name COLLATE NOCASE
     `)
         .bind(date)
         .all();
     const absent = [];
     const late = [];
-    const excused = [];
+    const sick = [];
+    const application = [];
     const unmarked = [];
     for (const student of students.results || []) {
         if (student.status ===
@@ -705,9 +784,11 @@ async function showMissing(env, chatId, messageId, date) {
             "late") {
             late.push(student.name);
         }
-        else if (student.status ===
-            "excused") {
-            excused.push(student.name);
+        else if (student.status === "sick" || student.status === "excused") {
+            sick.push(student.name);
+        }
+        else if (student.status === "application") {
+            application.push(student.name);
         }
         else if (!student.status) {
             unmarked.push(student.name);
@@ -779,17 +860,21 @@ async function showMissing(env, chatId, messageId, date) {
             "\nНикого";
     }
     text +=
-        `\n\n🏥 <b>УВАЖИТЕЛЬНО — ${excused.length}</b>`;
-    if (excused.length) {
-        text +=
-            "\n" +
-                excused
-                    .map(name => `• ${escapeHtml(name)}`)
-                    .join("\n");
+        `\n\n🤒 <b>БОЛЕЮТ — ${sick.length}</b>`;
+    if (sick.length) {
+        text += "\n" + sick.map(name => `• ${escapeHtml(name)}`).join("\n");
     }
     else {
-        text +=
-            "\nНикого";
+        text += "\nНикого";
+    }
+
+    text +=
+        `\n\n📝 <b>ПО ЗАЯВЛЕНИЮ — ${application.length}</b>`;
+    if (application.length) {
+        text += "\n" + application.map(name => `• ${escapeHtml(name)}`).join("\n");
+    }
+    else {
+        text += "\nНикого";
     }
     if (unmarked.length) {
         text +=
@@ -812,8 +897,11 @@ function statusEmoji(status) {
     if (status === "late") {
         return "⏰";
     }
-    if (status === "excused") {
-        return "🏥";
+    if (status === "sick" || status === "excused") {
+        return "🤒";
+    }
+    if (status === "application") {
+        return "📝";
     }
     return "➖";
 }
@@ -828,6 +916,11 @@ async function getActiveStudents(env) {
       WHERE active = 1
 
       ORDER BY
+        CASE
+          WHEN name = 'Кориков Денис' THEN 1
+          WHEN name = 'Гуска Александр' THEN 2
+          ELSE 0
+        END,
         name COLLATE NOCASE
     `)
         .all();
@@ -936,6 +1029,11 @@ async function showHistoryDay(env, chatId, messageId, date) {
         s.active = 1
 
       ORDER BY
+        CASE
+          WHEN s.name = 'Кориков Денис' THEN 1
+          WHEN s.name = 'Гуска Александр' THEN 2
+          ELSE 0
+        END,
         s.name COLLATE NOCASE
     `)
         .bind(date)
@@ -973,7 +1071,8 @@ async function showHistoryDay(env, chatId, messageId, date) {
         `\n\n✅ Есть: <b>${present}</b>
 ❌ Нет: <b>${absent}</b>
 ⏰ Опоздали: <b>${late}</b>
-🏥 Уважительно: <b>${excused}</b>
+🤒 Болеет: <b>${sick}</b>
+📝 По заявлению: <b>${application}</b>
 ➖ Не отмечено: <b>${unmarked}</b>`;
     await editOrSend(env, chatId, messageId, text, {
         inline_keyboard: [
@@ -1156,7 +1255,7 @@ async function showStudentCard(env, chatId, messageId, studentId) {
 ✅ Присутствовал: <b>${present}</b>
 ❌ Отсутствовал: <b>${absent}</b>
 ⏰ Опоздал: <b>${late}</b>
-🏥 Уважительно: <b>${excused}</b>
+🤒 Болеет: <b>${excused}</b>
 
 📈 Посещаемость: <b>${attendancePercent}%</b>
 
@@ -1955,6 +2054,11 @@ async function showGroupStats(env, chatId, messageId, period) {
         s.name
 
       ORDER BY
+        CASE
+          WHEN s.name = 'Кориков Денис' THEN 1
+          WHEN s.name = 'Гуска Александр' THEN 2
+          ELSE 0
+        END,
         s.name COLLATE NOCASE
     `)
         .all();
@@ -1998,7 +2102,7 @@ async function showGroupStats(env, chatId, messageId, period) {
 ✅ Присутствий: <b>${totalPresent}</b>
 ❌ Пропусков: <b>${totalAbsent}</b>
 ⏰ Опозданий: <b>${totalLate}</b>
-🏥 Уважительных: <b>${totalExcused}</b>`;
+🤒 Болезнь: <b>${totalExcused}</b>`;
     await editOrSend(env, chatId, messageId, text, {
         inline_keyboard: [
             [
@@ -2120,7 +2224,7 @@ async function showStudentPeriodStats(env, chatId, messageId, studentId, period)
 ✅ Присутствовал: <b>${present}</b>
 ❌ Отсутствовал: <b>${absent}</b>
 ⏰ Опоздал: <b>${late}</b>
-🏥 Уважительно: <b>${excused}</b>
+🤒 Болеет: <b>${excused}</b>
 
 📈 Посещаемость: <b>${percent}%</b>`, {
         inline_keyboard: [
@@ -2566,7 +2670,7 @@ async function showMainMenu(env, chatId, messageId = null) {
 ✅ Есть: <b>${present}</b>
 ❌ Нет: <b>${absent}</b>
 ⏰ Опоздали: <b>${late}</b>
-🏥 Уважительно: <b>${excused}</b>
+🤒 Болеет: <b>${excused}</b>
 
 ⚠️ Не отмечено: <b>${unmarked}</b>
 
@@ -3022,8 +3126,11 @@ function statusText(status) {
     if (status === "late") {
         return "Опоздал";
     }
-    if (status === "excused") {
-        return "Уважительная причина";
+    if (status === "sick" || status === "excused") {
+        return "Болеет";
+    }
+    if (status === "application") {
+        return "По заявлению";
     }
     return "Не отмечено";
 }
@@ -3389,7 +3496,7 @@ async function showPairStudent(env, chatId, messageId, date, studentId) {
 
 Нажимайте на пару для смены статуса:
 
-➖ → ✅ → ❌ → ⏰ → 🏥 → ➖
+➖ → ✅ → ❌ → ⏰ → 🤒 → 📝 → ➖
 
 Если студент ушёл во время определённой пары —
 используйте кнопку 🚪 ниже.`;
@@ -3448,8 +3555,10 @@ async function cyclePairStatus(env, date, lesson, studentId) {
         none: "present",
         present: "absent",
         absent: "late",
-        late: "excused",
-        excused: "none",
+        late: "sick",
+        sick: "application",
+        application: "none",
+        excused: "sick",
         left: "none"
     }[oldStatus] || "present";
     if (next === "none") {
@@ -3546,7 +3655,8 @@ async function showPairsSummary(env, chatId, messageId, date) {
         const present = [];
         const absent = [];
         const late = [];
-        const excused = [];
+        const sick = [];
+        const application = [];
         const left = [];
         const unmarked = [];
         for (const student of students) {
@@ -3560,8 +3670,11 @@ async function showPairsSummary(env, chatId, messageId, date) {
             else if (status === "late") {
                 late.push(student.name);
             }
-            else if (status === "excused") {
-                excused.push(student.name);
+            else if (status === "sick" || status === "excused") {
+                sick.push(student.name);
+            }
+            else if (status === "application") {
+                application.push(student.name);
             }
             else if (status === "left") {
                 left.push(student.name);
@@ -3592,11 +3705,13 @@ async function showPairsSummary(env, chatId, messageId, date) {
                     .map(escapeHtml)
                     .join(", ")}`;
         }
-        if (excused.length) {
+        if (sick.length) {
             text +=
-                `\n🏥 Уважительно: ${excused
-                    .map(escapeHtml)
-                    .join(", ")}`;
+                `\n🤒 Болеют: ${sick.map(escapeHtml).join(", ")}`;
+        }
+        if (application.length) {
+            text +=
+                `\n📝 По заявлению: ${application.map(escapeHtml).join(", ")}`;
         }
         if (unmarked.length) {
             text +=
@@ -3955,7 +4070,7 @@ showMainMenu =
 ❌ Пропущено пар: <b>${absent}</b>
 🚪 Ушёл раньше: <b>${left}</b>
 ⏰ Опозданий: <b>${late}</b>
-🏥 Уважительно: <b>${excused}</b>
+🤒 Болеет: <b>${excused}</b>
 ━━━━━━━━━━━━━━`;
             if (!rows.length) {
                 text +=
@@ -4093,6 +4208,12 @@ showMainMenu =
                                 text: "⚙️ Настройки",
                                 callback_data: "settings"
                             }
+                        ],
+                        [
+                            {
+                                text: "🌐 Веб-версия • в разработке",
+                                callback_data: "web_dev"
+                            }
                         ]
                     ]
                 });
@@ -4167,7 +4288,7 @@ ${lines.join("\n")}
 ❌ Пропуски пар
 🚪 Ушёл раньше
 ⏰ Опоздания
-🏥 Уважительно`;
+🤒 Болеет`;
                 await editOrSend(env, chatId, messageId, text, {
                     inline_keyboard: [
                         [
@@ -4216,7 +4337,8 @@ async function getParentsMonthStats(env, month) {
             SUM(CASE WHEN status = 'absent' THEN 1 ELSE 0 END) AS absent_count,
             SUM(CASE WHEN status = 'left' THEN 1 ELSE 0 END) AS left_count,
             SUM(CASE WHEN status = 'late' THEN 1 ELSE 0 END) AS late_count,
-            SUM(CASE WHEN status = 'excused' THEN 1 ELSE 0 END) AS excused_count
+            SUM(CASE WHEN status IN ('excused', 'sick') THEN 1 ELSE 0 END) AS sick_count,
+            SUM(CASE WHEN status = 'application' THEN 1 ELSE 0 END) AS application_count
         FROM lesson_attendance
         WHERE substr(date, 1, 7) = ?
         GROUP BY student_id
@@ -4257,7 +4379,8 @@ async function getParentsMonthStats(env, month) {
             absent: Number(row.absent_count || 0),
             left: Number(row.left_count || 0),
             late: Number(row.late_count || 0),
-            excused: Number(row.excused_count || 0)
+            sick: Number(row.sick_count || 0),
+            application: Number(row.application_count || 0)
         };
     });
 }
@@ -4278,14 +4401,15 @@ function parentTable(stats) {
             `${String(student.absent).padStart(2)} ` +
             `${String(student.left).padStart(2)} ` +
             `${String(student.late).padStart(2)} ` +
-            `${String(student.excused).padStart(2)}`
+            `${String(student.sick).padStart(2)} ` +
+            `${String(student.application).padStart(2)}`
         );
     });
 
-    return `Фамилия          📅 ❌ 🚪 ⏰ 🏥
-──────────────────────────
+    return `Фамилия          📅 ❌ 🚪 ⏰ 🤒 📝
+─────────────────────────────
 ${lines.join("\n")}
-──────────────────────────`;
+─────────────────────────────`;
 }
 
 function parentsTotals(stats) {
@@ -4295,10 +4419,11 @@ function parentsTotals(stats) {
             sum.absent += s.absent;
             sum.left += s.left;
             sum.late += s.late;
-            sum.excused += s.excused;
+            sum.sick += s.sick;
+            sum.application += s.application;
             return sum;
         },
-        { fullDays: 0, absent: 0, left: 0, late: 0, excused: 0 }
+        { fullDays: 0, absent: 0, left: 0, late: 0, sick: 0, application: 0 }
     );
 }
 
@@ -4315,10 +4440,11 @@ async function showParentsReportV4(env, chatId, messageId, month) {
 ❌ Пропущены отдельные пары
 🚪 Ушёл раньше
 ⏰ Опоздал
-🏥 Уважительная причина
+🤒 Болеет
+📝 По заявлению
 
 📌 <b>За месяц:</b>
-📅 ${totals.fullDays}  ❌ ${totals.absent}  🚪 ${totals.left}  ⏰ ${totals.late}  🏥 ${totals.excused}`;
+📅 ${totals.fullDays}  ❌ ${totals.absent}  🚪 ${totals.left}  ⏰ ${totals.late}  🤒 ${totals.sick}  📝 ${totals.application}`;
 
     await editOrSend(env, chatId, messageId, text, {
         inline_keyboard: [
@@ -4373,11 +4499,12 @@ async function showParentsScreenshot(env, chatId, messageId, month) {
 ❌ — пропущены отдельные пары
 🚪 — ушёл раньше
 ⏰ — опоздал
-🏥 — уважительная причина
+🤒 — болеет
+📝 — по заявлению
 
 <b>Итого за месяц:</b>
 📅 ${totals.fullDays}   ❌ ${totals.absent}
-🚪 ${totals.left}   ⏰ ${totals.late}   🏥 ${totals.excused}`;
+🚪 ${totals.left}   ⏰ ${totals.late}   🤒 ${totals.sick}  📝 ${totals.application}`;
 
     await editOrSend(env, chatId, messageId, text, {
         inline_keyboard: [
@@ -4408,7 +4535,7 @@ async function showParentStudentV4(env, chatId, messageId, month, studentId) {
         WHERE
             student_id = ?
             AND substr(date, 1, 7) = ?
-            AND status IN ('absent', 'left', 'late', 'excused')
+            AND status IN ('absent', 'left', 'late', 'excused', 'sick', 'application')
         ORDER BY date ASC, lesson_no ASC
     `).bind(studentId, month).all();
 
@@ -4425,13 +4552,14 @@ async function showParentStudentV4(env, chatId, messageId, month, studentId) {
     const rows = pairResult.results || [];
     const fullDays = fullDayResult.results || [];
 
-    let absent = 0, left = 0, late = 0, excused = 0;
+    let absent = 0, left = 0, late = 0, sick = 0, application = 0;
 
     for (const row of rows) {
         if (row.status === "absent") absent++;
         if (row.status === "left") left++;
         if (row.status === "late") late++;
-        if (row.status === "excused") excused++;
+        if (row.status === "excused" || row.status === "sick") sick++;
+        if (row.status === "application") application++;
     }
 
     let text = `👨‍👩‍👦 <b>ДЛЯ РОДИТЕЛЕЙ</b>
@@ -4444,7 +4572,7 @@ async function showParentStudentV4(env, chatId, messageId, month, studentId) {
 ❌ Пропущено пар: <b>${absent}</b>
 🚪 Ушёл раньше: <b>${left}</b>
 ⏰ Опозданий: <b>${late}</b>
-🏥 Уважительно: <b>${excused}</b>
+🤒 Болеет: <b>${excused}</b>
 ━━━━━━━━━━━━━━`;
 
     if (!fullDays.length && !rows.length) {
