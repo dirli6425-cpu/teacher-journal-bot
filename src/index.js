@@ -398,6 +398,22 @@ async function handleCallback(q, env) {
         });
         return;
     }
+    if (data.startsWith("parents_students:")) {
+        const month = data.split(":")[1];
+        await showParentsStudents(env, chatId, messageId, month);
+        return;
+    }
+
+    if (data.startsWith("parents_student:")) {
+        const parts = data.split(":");
+        const month = parts[1];
+        const studentId = Number(parts[2]);
+        if (month && studentId) {
+            await showParentStudentV4(env, chatId, messageId, month, studentId);
+        }
+        return;
+    }
+
     if (data === "attendance") {
         await showAttendance(env, chatId, messageId, localDate());
         return;
@@ -4661,8 +4677,10 @@ async function showParentStudentV4(env, chatId, messageId, month, studentId) {
                 eventText = `🚪 ушёл с ${row.lesson_no}-й пары`;
             } else if (row.status === "late") {
                 eventText = `⏰ опоздал на ${row.lesson_no}-ю пару`;
-            } else if (row.status === "excused") {
+            } else if (row.status === "excused" || row.status === "sick") {
                 eventText = `🤒 болеет, ${row.lesson_no}-я пара`;
+            } else if (row.status === "application") {
+                eventText = `📝 по заявлению, ${row.lesson_no}-я пара`;
             }
 
             events.push({
