@@ -4344,23 +4344,23 @@ showMainMenu =
                     const absent = Number(row.absent_count || 0);
                     const left = Number(row.left_count || 0);
                     const late = Number(row.late_count || 0);
-                    const excused = Number(row.excused_count || 0);
-                    let name = parentShortName(student.name);
-                    if (name.length > 16) {
-                        name =
-                            name.slice(0, 15) + "…";
+                    const sick = Number(row.sick_count || row.excused_count || 0);
+                    const application = Number(row.application_count || 0);
+                    let name = String(student.name || "").trim().split(/\s+/)[0];
+                    if (name.length > 11) {
+                        name = name.slice(0, 10) + "…";
                     }
-                    name =
-                        name.padEnd(17, " ");
-                    lines.push(`${name} ${String(absent).padStart(2)}  ` +
-                        `${String(left).padStart(2)}  ` +
-                        `${String(late).padStart(2)}  ` +
-                        `${String(excused).padStart(2)}`);
+                    name = name.padEnd(12, " ");
+                    lines.push(`${name} ${String(absent).padStart(2)} ` +
+                        `${String(left).padStart(2)} ` +
+                        `${String(late).padStart(2)} ` +
+                        `${String(sick).padStart(2)} ` +
+                        `${String(application).padStart(2)}`);
                 }
-                const table = `Фамилия            ❌  🚪  ⏰  🤒
-────────────────────────────
+                const table = `Фамилия      ❌ 🚪 ⏰ 🤒 📝
+──────────────────────────
 ${lines.join("\n")}
-────────────────────────────`;
+──────────────────────────`;
                 const text = `👨‍👩‍👦 <b>ДЛЯ РОДИТЕЛЕЙ</b>
 📊 <b>${monthTitle(month)} • ГРУППА 102</b>
 
@@ -4368,7 +4368,8 @@ ${lines.join("\n")}
 ❌ Пропуски пар
 🚪 Ушёл раньше
 ⏰ Опоздания
-🤒 Болеет`;
+🤒 Болеет
+📝 По заявлению`;
                 await editOrSend(env, chatId, messageId, text, {
                     inline_keyboard: [
                         [
