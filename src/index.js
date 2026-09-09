@@ -44,6 +44,29 @@ export default {
                 return new Response("OK");
             }
 
+            if (request.method === "GET" && url.pathname === "/android/update.json") {
+                return jsonResponse({
+                    versionCode: 6,
+                    versionName: "1.1.0",
+                    required: false,
+                    notes: "Встроено обновление приложения через Cloudflare.",
+                    apkUrl: `${url.origin}/android/latest.apk`
+                });
+            }
+
+            if (request.method === "GET" && url.pathname === "/android/latest.apk") {
+                if (!env.ANDROID_APK) return jsonResponse({ error: "ANDROID_APK R2 binding не настроен" }, 503);
+                const obj = await env.ANDROID_APK.get("latest.apk");
+                if (!obj) return jsonResponse({ error: "latest.apk ещё не загружен" }, 404);
+                return new Response(obj.body, {
+                    headers: {
+                        "content-type": "application/vnd.android.package-archive",
+                        "content-disposition": 'attachment; filename="Journal102-latest.apk"',
+                        "cache-control": "no-store"
+                    }
+                });
+            }
+
             if (url.pathname.startsWith("/api/")) {
                 return await handleWebApi(request, env, url);
             }
