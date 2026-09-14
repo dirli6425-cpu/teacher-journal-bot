@@ -24218,7 +24218,7 @@ async function createExcelReport(env, period) {
     { wch: 18 },
     { wch: 12 },
     { wch: 10 },
-    { wch: 19 },
+    { wch: 13 },
     { wch: 42 }
   ];
   summarySheet["!cols"] = [
@@ -24372,6 +24372,23 @@ async function createExcelReport(env, period) {
 
   colorStatusCells(parentSheet);
   colorStatusCells(eventSheet);
+
+  // Колонка "Пропущено часов" — компактная и строго по центру.
+  const missedHoursCol = 2 + maxLesson + 5;
+  for (let r = 4; r < parentRows.length; r++) {
+    const addr = utils.encode_cell({ r, c: missedHoursCol });
+    const cell = parentSheet[addr];
+    if (!cell) continue;
+    cell.s = {
+      ...(cell.s || {}),
+      alignment: {
+        vertical: "center",
+        horizontal: "center",
+        wrapText: true
+      },
+      border: r === 4 ? thinBorder : (cell.s?.border || thinBorder)
+    };
+  }
 
   // Автофильтры на таблицах
   parentSheet["!autofilter"] = {
