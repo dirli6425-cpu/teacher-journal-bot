@@ -26123,19 +26123,23 @@ pages.audit=async function(c){
   function info(x){return A[x.action]||['🛡️','Действие в системе','Система']}
   function actor(x){
     var v=String(x.actor_user_id||'Система');
-    return (v==='null'||v==='undefined'||v==='system')?'Система':v;
+    if(v==='null'||v==='undefined'||v==='system')return 'Система';
+    return v;
   }
   function ru(v){
-    return String(v||'')
-      .replace(/\bpresent\b/gi,'присутствует')
-      .replace(/\babsent\b/gi,'отсутствует')
-      .replace(/\bsick\b/gi,'болеет')
-      .replace(/\bapplication\b/gi,'по заявлению')
-      .replace(/\blate\b/gi,'опоздал')
-      .replace(/\bleft\b/gi,'ушёл раньше')
-      .replace(/\bpassword\b/gi,'логин и пароль')
-      .replace(/\btelegram_webapp\b/gi,'Telegram')
-      .replace(/\s*\/\s*/g,' · ');
+    var t=String(v||'');
+    var pairs=[
+      ['present','присутствует'],
+      ['absent','отсутствует'],
+      ['sick','болеет'],
+      ['application','по заявлению'],
+      ['late','опоздал'],
+      ['left','ушёл раньше'],
+      ['password','логин и пароль'],
+      ['telegram_webapp','Telegram']
+    ];
+    pairs.forEach(function(p){t=t.split(p[0]).join(p[1])});
+    return t;
   }
   function when(v){
     var z=new Date(v);
@@ -26152,7 +26156,11 @@ pages.audit=async function(c){
       root.innerHTML='<div class="audit-empty">🔎<b>Ничего не найдено</b><span>Попробуйте изменить фильтр</span></div>';
       return;
     }
-    list.forEach(function(x){var k=when(x.created_at).date;(groups[k]||(groups[k]=[])).push(x)});
+    list.forEach(function(x){
+      var k=when(x.created_at).date;
+      if(!groups[k])groups[k]=[];
+      groups[k].push(x);
+    });
     root.innerHTML=Object.keys(groups).map(function(day){
       return '<section class="audit-day"><div class="audit-date"><b>📅 '+esc(day)+'</b><span>'+groups[day].length+' событий</span></div>'+
       groups[day].map(function(x){
@@ -26168,7 +26176,10 @@ pages.audit=async function(c){
   }
 
   var cats=[];
-  rows.forEach(function(x){var c=info(x)[2];if(cats.indexOf(c)<0)cats.push(c)});
+  rows.forEach(function(x){
+    var k=info(x)[2];
+    if(cats.indexOf(k)<0)cats.push(k);
+  });
   cats.sort();
 
   c.innerHTML='<style>'+
@@ -26187,7 +26198,8 @@ pages.audit=async function(c){
   '<div id="auditRows"></div>';
 
   function filter(){
-    var q=(document.getElementById('auditQ').value||'').trim().toLowerCase(),cat=document.getElementById('auditCat').value;
+    var q=(document.getElementById('auditQ').value||'').trim().toLowerCase();
+    var cat=document.getElementById('auditCat').value;
     draw(rows.filter(function(x){
       var m=info(x),hay=(m[1]+' '+m[2]+' '+actor(x)+' '+ru(x.details)).toLowerCase();
       return (!q||hay.indexOf(q)>=0)&&(!cat||m[2]===cat);
