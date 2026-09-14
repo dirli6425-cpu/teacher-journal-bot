@@ -24007,9 +24007,13 @@ async function createExcelReport(env, period) {
     "Дата",
     "Студент",
     ...Array.from({ length: maxLesson }, (_, i) => `${i + 1} пара`),
-    "Пропущено часов",
+    "Отсутствовал",
+    "Болел",
+    "По заявлению",
     "Опоздал",
-    "Ушёл"
+    "Ушёл",
+    "Пропущено часов",
+    "События за день"
   ];
 
   const parentRows = [
@@ -24020,16 +24024,36 @@ async function createExcelReport(env, period) {
     parentHeader
   ];
 
+  let lastParentDate = null;
   for (const x of [...byDayStudent.values()].sort((a, b) =>
     a.date.localeCompare(b.date) || a.name.localeCompare(b.name, "ru")
   )) {
-    const row = [dateRu(x.date), x.name];
-    for (let lesson = 1; lesson <= maxLesson; lesson++) {
-      row.push(x.lessons[lesson] ? excelStatus(x.lessons[lesson]) : "");
+    if (lastParentDate !== null && lastParentDate !== x.date) {
+      // Пустая строка между днями — визуально отчёт читается намного легче.
+      parentRows.push([]);
     }
-    row.push(x.hours);
+    lastParentDate = x.date;
+
+    const row = [dateRu(x.date), x.name];
+    const dayEvents = [];
+
+    for (let lesson = 1; lesson <= maxLesson; lesson++) {
+      const status = x.lessons[lesson];
+      row.push(status ? excelStatus(status) : "");
+
+      if (status && status !== "present") {
+        dayEvents.push(`${lesson} пара — ${excelStatus(status).replace(/^[^ ]+ /, "")}`);
+      }
+    }
+
+    row.push(x.absent ? x.absent : "");
+    row.push(x.sick ? x.sick : "");
+    row.push(x.application ? x.application : "");
     row.push(x.late ? x.late : "");
     row.push(x.left ? x.left : "");
+    row.push(x.hours);
+    row.push(dayEvents.join("; "));
+
     parentRows.push(row);
   }
 
@@ -24187,11 +24211,15 @@ async function createExcelReport(env, period) {
   // Ширины столбцов и удобство чтения
   parentSheet["!cols"] = [
     { wch: 13 },
-    { wch: 32 },
-    ...Array.from({ length: maxLesson }, () => ({ wch: 19 })),
+    { wch: 30 },
+    ...Array.from({ length: maxLesson }, () => ({ wch: 18 })),
+    { wch: 14 },
+    { wch: 12 },
+    { wch: 18 },
+    { wch: 12 },
+    { wch: 10 },
     { wch: 19 },
-    { wch: 11 },
-    { wch: 11 }
+    { wch: 42 }
   ];
   summarySheet["!cols"] = [
     { wch: 32 },
@@ -24214,6 +24242,78 @@ async function createExcelReport(env, period) {
     { wch: 28 },
     { wch: 48 }
   ];
+
+
+  // ---------- ОФОРМЛЕНИЕ ----------
+  // SheetJS понимает cell.s при записи XLSX. Делаем настоящую сетку таблицы,
+  // шапки, перенос текста и понятное выравнивание.
+  const thinBorder = {
+    top: { style: "thin", color: { rgb: "B9C6CE" } },
+    bottom: { style: "thin", color: { rgb: "B9C6CE" } },
+    left: { style: "thin", color: { rgb: "B9C6CE" } },
+    right: { style: "thin", color: { rgb: "B9C6CE" } }
+  };
+
+  function styleRange(ws, headerRow, titleRows = []) {
+    const ref = ws["!ref"];
+    if (!ref) return;
+    const range = utils.decode_range(ref);
+
+    for (let r = range.s.r; r <= range.e.r; r++) {
+      for (let c = range.s.c; c <= range.e.c; c++) {
+        const addr = utils.encode_cell({ r, c });
+        const cell = ws[addr];
+        if (!cell) continue;
+
+        const isTitle = titleRows.includes(r);
+        const isHeader = r === headerRow;
+
+        cell.s = {
+          font: isTitle
+            ? { bold: true, sz: r === 0 ? 16 : 11, color: { rgb: "17324D" } }
+            : isHeader
+              ? { bold: true, color: { rgb: "FFFFFF" } }
+              : { sz: 10, color: { rgb: "263238" } },
+          fill: isHeader
+            ? { patternType: "solid", fgColor: { rgb: "2F75B5" } }
+            : isTitle
+              ? { patternType: "solid", fgColor: { rgb: "EAF3FA" } }
+              : { patternType: "solid", fgColor: { rgb: "FFFFFF" } },
+          border: isTitle ? undefined : thinBorder,
+          alignment: {
+            vertical: "center",
+            horizontal: isHeader ? "center" : (c === 1 ? "left" : "center"),
+            wrapText: true
+          }
+        };
+      }
+    }
+  }
+
+  function styleBlankDayRows(ws, startRow, endRow, width) {
+    for (let r = startRow; r <= endRow; r++) {
+      let has = false;
+      for (let c = 0; c < width; c++) {
+        const cell = ws[utils.encode_cell({ r, c })];
+        if (cell && String(cell.v ?? "").trim() !== "") {
+          has = true;
+          break;
+        }
+      }
+      if (!has) {
+        if (!ws["!rows"]) ws["!rows"] = [];
+        ws["!rows"][r] = { hpt: 8 };
+      }
+    }
+  }
+
+  styleRange(parentSheet, 4, [0, 1, 2]);
+  styleRange(summarySheet, 4, [0, 1, 2]);
+  styleRange(eventSheet, 0, []);
+  styleRange(infoSheet, -1, [0]);
+
+  // В родительском листе пустые строки между днями остаются без рамки.
+  styleBlankDayRows(parentSheet, 5, parentRows.length - 1, parentHeader.length);
 
   // Заголовки как единые красивые полосы
   parentSheet["!merges"] = [
@@ -24239,6 +24339,40 @@ async function createExcelReport(env, period) {
   ];
   eventSheet["!rows"] = [{ hpt: 25 }];
 
+  function colorStatusCells(ws) {
+    const ref = ws["!ref"];
+    if (!ref) return;
+    const range = utils.decode_range(ref);
+    for (let r = range.s.r; r <= range.e.r; r++) {
+      for (let c = range.s.c; c <= range.e.c; c++) {
+        const addr = utils.encode_cell({ r, c });
+        const cell = ws[addr];
+        if (!cell || typeof cell.v !== "string") continue;
+        const v = cell.v;
+
+        let rgb = null;
+        if (v.includes("Отсутствовал")) rgb = "FCE8E6";
+        else if (v.includes("Опоздал")) rgb = "FFF4CC";
+        else if (v.includes("Ушёл")) rgb = "FFE6CC";
+        else if (v.includes("Болел")) rgb = "E7F0FE";
+        else if (v.includes("По заявлению")) rgb = "EEE7FA";
+        else if (v.includes("Был")) rgb = "E6F4EA";
+
+        if (rgb) {
+          cell.s = {
+            ...(cell.s || {}),
+            fill: { patternType: "solid", fgColor: { rgb } },
+            border: thinBorder,
+            alignment: { vertical: "center", horizontal: "center", wrapText: true }
+          };
+        }
+      }
+    }
+  }
+
+  colorStatusCells(parentSheet);
+  colorStatusCells(eventSheet);
+
   // Автофильтры на таблицах
   parentSheet["!autofilter"] = {
     ref: `A5:${utils.encode_col(parentHeader.length - 1)}${parentRows.length}`
@@ -24257,7 +24391,8 @@ async function createExcelReport(env, period) {
 
   const buffer = writeSync(workbook, {
     type: "array",
-    bookType: "xlsx"
+    bookType: "xlsx",
+    cellStyles: true
   });
 
   return {
