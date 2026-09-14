@@ -26127,25 +26127,8 @@ pages.audit=async function(c){
       .replace(/\blate\b/g,'опоздал')
       .replace(/\bleft\b/g,'ушёл раньше')
       .replace(/\bnone\b/g,'не отмечено')
-      .replace(/\btrue\b/gi,'да')
-      .replace(/\bfalse\b/gi,'нет');
-  }
-
-  function prettyDetails(x){
-    var t=ruStatus(x.details||'');
-    if(!t)return 'Без дополнительных деталей';
-    try{
-      if(t[0]==='{'||t[0]==='['){
-        var o=JSON.parse(x.details||'{}');
-        var parts=[];
-        Object.keys(o).forEach(function(k){
-          var names={group_name:'Название группы',timezone:'Часовой пояс',enabled:'Доступ',role:'Роль'};
-          parts.push((names[k]||k)+': '+ruStatus(o[k]));
-        });
-        return parts.join(' · ');
-      }
-    }catch(e){}
-    return t.replace(/\s*\/\s*/g,' · ').replace(/student=/g,'ученик #');
+      .replace(/\bpassword\b/g,'по логину и паролю')
+      .replace(/\btelegram_webapp\b/g,'через Telegram');
   }
 
   function dtParts(v){
@@ -26158,65 +26141,61 @@ pages.audit=async function(c){
     }catch(e){return {day:String(v||''),time:''}}
   }
 
+  function actorName(x){
+    var a=String(x.actor_user_id||'Система');
+    if(a==='system'||a==='null'||a==='undefined') return 'Система';
+    return a;
+  }
+
+  function details(x){
+    var t=ruStatus(x.details||'');
+    return t ? t.replace(/\s*\/\s*/g,' · ').replace(/student=/g,'ученик #') : 'Без дополнительных деталей';
+  }
+
   function render(list){
     var root=document.getElementById('auditRows');
-    if(!list.length){root.innerHTML='<div class="card" style="text-align:center;padding:28px"><div style="font-size:34px">🫙</div><b>Ничего не найдено</b><div class="muted small">Измените фильтр или строку поиска.</div></div>';return}
-
+    if(!list.length){
+      root.innerHTML='<div class="card" style="text-align:center;padding:28px"><div style="font-size:34px">🫙</div><b>Ничего не найдено</b></div>';
+      return;
+    }
     var groups={};
     list.forEach(function(x){
-      var p=dtParts(x.created_at),key=p.day;
-      (groups[key]||(groups[key]=[])).push(x);
+      var p=dtParts(x.created_at);
+      (groups[p.day]||(groups[p.day]=[])).push(x);
     });
-
     root.innerHTML=Object.keys(groups).map(function(day){
       return '<div class="audit-day"><div class="audit-day-title">📅 '+esc(day)+'<span>'+groups[day].length+' событий</span></div>'+
         groups[day].map(function(x){
           var m=actionMap[x.action]||['🛡️','Действие в системе','Другое'];
-          var p=dtParts(x.created_at);
-          var actor=x.actor_name||x.actor_user_id||'Система';
-          var initials=String(actor).trim().split(/\s+/).map(function(q){return q[0]||''}).join('').slice(0,2).toUpperCase()||'⚙';
-          return '<div class="audit-card" data-audit-action="'+esc(x.action)+'" data-audit-actor="'+esc(actor.toLowerCase())+'">'+
+          var p=dtParts(x.created_at),actor=actorName(x);
+          return '<div class="audit-card">'+
             '<div class="audit-icon">'+m[0]+'</div>'+
             '<div class="audit-main"><div class="audit-top"><b>'+esc(m[1])+'</b><span class="audit-time">🕒 '+esc(p.time)+'</span></div>'+
-              '<div class="audit-detail">'+esc(prettyDetails(x))+'</div>'+
-              '<div class="audit-meta"><span class="audit-user"><i>'+esc(initials)+'</i>'+esc(actor)+'</span><span class="audit-chip">'+esc(m[2])+'</span></div>'+
-            '</div>'+
+            '<div class="audit-detail">'+esc(details(x))+'</div>'+
+            '<div class="audit-meta"><span class="audit-user">👤 '+esc(actor)+'</span><span class="audit-chip">'+esc(m[2])+'</span></div></div>'+
           '</div>';
-        }).join('')+
-      '</div>';
+        }).join('')+'</div>';
     }).join('');
   }
 
-  var uniqueActors=[];
-  rows.forEach(function(x){var a=x.actor_name||x.actor_user_id||'Система';if(!uniqueActors.includes(a))uniqueActors.push(a)});
-
   c.innerHTML=
     '<style>'+
-    '.audit-hero{background:linear-gradient(135deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:18px;padding:18px;margin-bottom:14px}.audit-hero h2{margin:0 0 4px}.audit-controls{display:grid;grid-template-columns:1.6fr 1fr 1fr;gap:9px;margin-top:14px}.audit-day{margin:16px 0}.audit-day-title{display:flex;align-items:center;justify-content:space-between;font-weight:800;margin:0 4px 8px}.audit-day-title span{font-size:11px;color:var(--muted);font-weight:600}.audit-card{display:flex;gap:12px;align-items:flex-start;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:8px;box-shadow:0 5px 20px rgba(0,0,0,.08)}.audit-card:hover{border-color:var(--accent)}.audit-icon{width:42px;height:42px;min-width:42px;border-radius:13px;background:var(--panel2);display:flex;align-items:center;justify-content:center;font-size:21px}.audit-main{min-width:0;flex:1}.audit-top{display:flex;align-items:center;justify-content:space-between;gap:10px}.audit-time{font-size:11px;color:var(--muted);white-space:nowrap}.audit-detail{margin-top:5px;color:var(--muted);font-size:13px;line-height:1.45;word-break:break-word}.audit-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:9px}.audit-user{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:700}.audit-user i{font-style:normal;width:24px;height:24px;border-radius:8px;background:var(--panel2);display:inline-flex;align-items:center;justify-content:center;font-size:10px}.audit-chip{font-size:10px;padding:4px 7px;border-radius:999px;background:var(--panel2);color:var(--muted)}@media(max-width:700px){.audit-controls{grid-template-columns:1fr}.audit-top{align-items:flex-start}.audit-time{font-size:10px}.audit-card{padding:12px}.audit-detail{font-size:12px}}'+
+    '.audit-hero{background:linear-gradient(135deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:18px;padding:18px;margin-bottom:14px}.audit-hero h2{margin:0 0 4px}.audit-controls{display:grid;grid-template-columns:2fr 1fr;gap:9px;margin-top:14px}.audit-day{margin:16px 0}.audit-day-title{display:flex;align-items:center;justify-content:space-between;font-weight:800;margin:0 4px 8px}.audit-day-title span{font-size:11px;color:var(--muted)}.audit-card{display:flex;gap:12px;align-items:flex-start;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:8px}.audit-icon{width:42px;height:42px;min-width:42px;border-radius:13px;background:var(--panel2);display:flex;align-items:center;justify-content:center;font-size:21px}.audit-main{min-width:0;flex:1}.audit-top{display:flex;justify-content:space-between;gap:10px}.audit-time{font-size:11px;color:var(--muted);white-space:nowrap}.audit-detail{margin-top:5px;color:var(--muted);font-size:13px;line-height:1.45;word-break:break-word}.audit-meta{display:flex;gap:8px;flex-wrap:wrap;margin-top:9px;font-size:12px}.audit-chip{font-size:10px;padding:4px 7px;border-radius:999px;background:var(--panel2);color:var(--muted)}@media(max-width:700px){.audit-controls{grid-template-columns:1fr}.audit-card{padding:12px}.audit-detail{font-size:12px}}'+
     '</style>'+
-    '<div class="audit-hero"><div class="section-head" style="margin:0"><div><h2>🛡️ Журнал действий</h2><div class="muted">Кто, что и когда делал в системе — без технической тарабарщины</div></div><div class="pill">'+rows.length+' последних событий</div></div>'+
-      '<div class="audit-controls">'+
-        '<input id="auditSearch" placeholder="🔎 Поиск по действиям, деталям и людям">'+
-        '<select id="auditActor"><option value="">Все пользователи</option>'+uniqueActors.map(function(a){return '<option value="'+esc(a.toLowerCase())+'">'+esc(a)+'</option>'}).join('')+'</select>'+
-        '<select id="auditType"><option value="">Все разделы</option><option value="Посещаемость">Посещаемость</option><option value="Пары">Пары</option><option value="Студенты">Студенты</option><option value="Питание">Питание</option><option value="Линейка">Линейка</option><option value="Пользователи">Пользователи</option><option value="Расписание">Расписание</option><option value="Настройки">Настройки</option><option value="Дежурство">Дежурство</option><option value="Вход">Входы</option></select>'+
-      '</div>'+
-    '</div>'+
+    '<div class="audit-hero"><div class="section-head" style="margin:0"><div><h2>🛡️ Журнал действий</h2><div class="muted">Кто, что и во сколько делал в системе</div></div><div class="pill">'+rows.length+' событий</div></div>'+
+    '<div class="audit-controls"><input id="auditSearch" placeholder="🔎 Поиск"><select id="auditType"><option value="">Все разделы</option><option>Посещаемость</option><option>Пары</option><option>Студенты</option><option>Питание</option><option>Линейка</option><option>Пользователи</option><option>Расписание</option><option>Настройки</option><option>Дежурство</option><option>Вход</option></select></div></div>'+
     '<div id="auditRows"></div>';
 
   function apply(){
-    var q=(document.getElementById('auditSearch').value||'').trim().toLowerCase();
-    var actor=document.getElementById('auditActor').value;
+    var q=(document.getElementById('auditSearch').value||'').toLowerCase();
     var type=document.getElementById('auditType').value;
-    var list=rows.filter(function(x){
+    render(rows.filter(function(x){
       var m=actionMap[x.action]||['','Действие в системе','Другое'];
-      var a=String(x.actor_name||x.actor_user_id||'Система').toLowerCase();
-      var hay=(m[1]+' '+prettyDetails(x)+' '+a+' '+m[2]).toLowerCase();
-      return (!q||hay.includes(q))&&(!actor||a===actor)&&(!type||m[2]===type);
-    });
-    render(list);
+      var hay=(m[1]+' '+details(x)+' '+actorName(x)+' '+m[2]).toLowerCase();
+      return (!q||hay.includes(q))&&(!type||m[2]===type);
+    }));
   }
   document.getElementById('auditSearch').oninput=apply;
-  document.getElementById('auditActor').onchange=apply;
   document.getElementById('auditType').onchange=apply;
   render(rows);
 }
@@ -27429,27 +27408,7 @@ async function handleWebApi(request, env, url) {
     }
     if (path === "/api/audit") {
       if (user.role !== "owner") return jsonResponse({ error: "\u0422\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u0430\u0434\u0435\u043B\u0435\u0446" }, 403);
-      const rows=(await env.DB.prepare(`
-        SELECT l.*,
-          COALESCE(
-            a.display_name,
-            a.login,
-            u.first_name || CASE WHEN u.last_name IS NOT NULL AND u.last_name<>'' THEN ' ' || u.last_name ELSE '' END,
-            l.actor_user_id,
-            'Система'
-          ) AS actor_name,
-          a.login AS actor_login
-        FROM audit_log l
-        LEFT JOIN web_accounts a
-          ON CAST(a.telegram_user_id AS TEXT)=CAST(l.actor_user_id AS TEXT)
-          OR a.login=l.actor_user_id
-          OR CAST(a.id AS TEXT)=CAST(l.actor_user_id AS TEXT)
-        LEFT JOIN users u
-          ON CAST(u.user_id AS TEXT)=CAST(l.actor_user_id AS TEXT)
-        ORDER BY l.id DESC
-        LIMIT 300
-      `).all()).results||[];
-      return jsonResponse({rows});
+      return jsonResponse({ rows: (await env.DB.prepare(`SELECT * FROM audit_log ORDER BY id DESC LIMIT 300`).all()).results || [] });
     }
     if (path === "/api/settings" && request.method === "GET") {
       const rows = (await env.DB.prepare(`SELECT key,value FROM app_settings WHERE key IN ('group_name','timezone')`).all()).results || [];
