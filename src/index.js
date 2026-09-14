@@ -24449,6 +24449,10 @@ initDb = /* @__PURE__ */ __name(async function(env) {
     date TEXT NOT NULL, student_id INTEGER NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL,
     PRIMARY KEY(date,student_id)
   )`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS class_hour_attendance (
+    date TEXT NOT NULL, student_id INTEGER NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL,
+    PRIMARY KEY(date,student_id)
+  )`).run();
 }, "initDb");
 function lessonsCountForDate(date) {
   const day = dateWeekday(date);
@@ -25612,7 +25616,7 @@ button,input,select,textarea{font:inherit}.hidden{display:none!important}.muted{
 (function(){
 var state={me:null,page:'dashboard',students:[],date:new Date().toISOString().slice(0,10),month:new Date().toISOString().slice(0,7)};
 var nav=[
- ['dashboard','\u{1F3E0}','\u0413\u043B\u0430\u0432\u043D\u0430\u044F'],['journal','\u{1F465}','\u0416\u0443\u0440\u043D\u0430\u043B'],['pairs','\u{1F4DA}','\u041F\u043E \u043F\u0430\u0440\u0430\u043C'],['students','\u{1F464}','\u0421\u0442\u0443\u0434\u0435\u043D\u0442\u044B'],['lineup','📢','Линейка'],['meals','\u{1F37D}\uFE0F','\u041F\u0438\u0442\u0430\u043D\u0438\u0435'],
+ ['dashboard','\u{1F3E0}','\u0413\u043B\u0430\u0432\u043D\u0430\u044F'],['journal','\u{1F465}','\u0416\u0443\u0440\u043D\u0430\u043B'],['pairs','\u{1F4DA}','\u041F\u043E \u043F\u0430\u0440\u0430\u043C'],['students','\u{1F464}','\u0421\u0442\u0443\u0434\u0435\u043D\u0442\u044B'],['lineup','📢','Линейка'],['classhour','🧑‍🏫','Классный час'],['meals','\u{1F37D}\uFE0F','\u041F\u0438\u0442\u0430\u043D\u0438\u0435'],
  ['calendar','\u{1F4C5}','\u041A\u0430\u043B\u0435\u043D\u0434\u0430\u0440\u044C'],['health','\u{1F912}','\u0411\u043E\u043B\u0435\u0437\u043D\u0438 \u0438 \u0437\u0430\u044F\u0432\u043B\u0435\u043D\u0438\u044F'],['duty','\u{1F9F9}','\u0414\u0435\u0436\u0443\u0440\u0441\u0442\u0432\u043E'],
  ['schedule','\u{1F5D3}\uFE0F','\u0420\u0430\u0441\u043F\u0438\u0441\u0430\u043D\u0438\u0435'],['parents','\u{1F468}\u200D\u{1F469}\u200D\u{1F466}','\u0420\u043E\u0434\u0438\u0442\u0435\u043B\u044F\u043C'],['analytics','\u{1F4CA}','\u0410\u043D\u0430\u043B\u0438\u0442\u0438\u043A\u0430'],
  ['reports','\u{1F4C4}','\u041E\u0442\u0447\u0451\u0442\u044B'],['online','\u{1F7E2}','\u041E\u043D\u043B\u0430\u0439\u043D'],['users','\u{1F465}','\u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u0438'],
@@ -25821,6 +25825,47 @@ pages.meals=async function(c){
 };
 pages.dashboard=async function(c){var d=await api('/api/dashboard');c.innerHTML='<div class="grid">'+metric('\u{1F465} \u0423\u0447\u0435\u043D\u0438\u043A\u043E\u0432',d.students)+metric('\u274C \u041D\u0435\u0442 \u0441\u0435\u0433\u043E\u0434\u043D\u044F',d.absent)+metric('\u{1F912} \u0411\u043E\u043B\u0435\u044E\u0442',d.sick)+metric('\u{1F4DD} \u041F\u043E \u0437\u0430\u044F\u0432\u043B\u0435\u043D\u0438\u044E',d.application)+'</div><div class="grid" style="margin-top:14px;grid-template-columns:2fr 1fr"><div class="card"><div class="section-head"><h2>\u0421\u0435\u0433\u043E\u0434\u043D\u044F</h2></div><div class="list">'+(d.today.map(function(x){return '<div class="list-item"><div>'+x.icon+'</div><div><b>'+esc(x.name)+'</b><div class="muted small">'+esc(x.text)+'</div></div></div>'}).join('')||'<div class="muted">\u0421\u043E\u0431\u044B\u0442\u0438\u0439 \u043D\u0435\u0442</div>')+'</div></div><div class="card"><h2 style="margin-top:0">\u{1F9F9} \u0414\u0435\u0436\u0443\u0440\u043D\u044B\u0435</h2><div>'+((d.duty||[]).map(function(x){return '<div class="pill" style="margin:3px">'+esc(x.name)+'</div>'}).join('')||'<span class="muted">\u041D\u0435 \u043D\u0430\u0437\u043D\u0430\u0447\u0435\u043D\u044B</span>')+'</div></div></div>'}
 pages.journal=async function(c){await loadStudents();var d=await api('/api/attendance?date='+state.date);var rows=state.students.map(function(s){var st=d.statuses[String(s.id)]||'none';return '<tr><td><div class="student"><div class="avatar">'+esc(s.name[0])+'</div><b>'+esc(s.name)+'</b></div></td><td>'+statusButton(st,s.id,'day',state.date)+'</td></tr>'}).join('');c.innerHTML='<div class="section-head"><h2>\u{1F465} \u041F\u043E\u0441\u0435\u0449\u0430\u0435\u043C\u043E\u0441\u0442\u044C</h2><div class="actions"><input type="date" id="journalDate" value="'+state.date+'"><button class="btn secondary" id="allPresent">\u2705 \u0412\u0441\u0435 \u0435\u0441\u0442\u044C</button></div></div><div class="table-wrap"><table class="table"><thead><tr><th>\u0423\u0447\u0435\u043D\u0438\u043A</th><th>\u0421\u0442\u0430\u0442\u0443\u0441</th></tr></thead><tbody>'+rows+'</tbody></table></div>';document.getElementById('journalDate').onchange=function(){state.date=this.value;go('journal')};document.getElementById('allPresent').onclick=async function(){await api('/api/attendance/all-present',{method:'POST',body:JSON.stringify({date:state.date})});toast('\u0412\u0441\u0435 \u043E\u0442\u043C\u0435\u0447\u0435\u043D\u044B');go('journal')};bindStatusButtons()}
+pages.classhour=async function(c){
+  await loadStudents();
+  var selectedDate=state.date;
+  var month=selectedDate.slice(0,7);
+  function ymLabel(ym){
+    var m=['','Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+    var p=ym.split('-');return m[Number(p[1])]+' '+p[0];
+  }
+  function meta(v){
+    return v==='present'?['✅','Был']:v==='absent'?['❌','Не был']:v==='sick'?['🤒','Болел']:v==='application'?['📝','По заявлению']:['➖','Не отмечено'];
+  }
+  c.innerHTML='<div class="section-head"><div><h2>🧑‍🏫 Классный час</h2><div class="muted">По умолчанию никто не отмечен · выберите дату и отметьте студентов</div></div></div><div id="chCalendar"></div><div id="chDay" style="margin-top:14px"></div>';
+
+  async function calendar(){
+    var d=await api('/api/class-hour/calendar?month='+month),map={};
+    (d.days||[]).forEach(function(x){map[x.date]=x});
+    var p=month.split('-'),y=Number(p[0]),m=Number(p[1]),first=new Date(y,m-1,1),days=new Date(y,m,0).getDate(),offset=(first.getDay()+6)%7,cells=[];
+    for(var q=0;q<offset;q++)cells.push('<div></div>');
+    for(var day=1;day<=days;day++){
+      var ds=y+'-'+String(m).padStart(2,'0')+'-'+String(day).padStart(2,'0'),x=map[ds]||{},on=ds===selectedDate;
+      cells.push('<button class="ch-day '+(on?'ch-on':'')+'" data-date="'+ds+'"><b>'+day+'</b><span>'+(Number(x.marked||0)?Number(x.marked)+' отмеч.':'—')+'</span></button>');
+    }
+    document.getElementById('chCalendar').innerHTML='<div class="card"><div class="section-head"><div><h2 style="margin:0">'+ymLabel(month)+'</h2><div class="small muted">Выберите день классного часа</div></div><div class="actions"><button class="btn ghost" id="chPrev">◀</button><button class="btn ghost" id="chNext">▶</button></div></div><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:7px;margin-bottom:7px">'+['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(function(x){return '<div class="small muted" style="text-align:center;font-weight:700">'+x+'</div>'}).join('')+'</div><div style="display:grid;grid-template-columns:repeat(7,1fr);gap:7px">'+cells.join('')+'</div></div><style>.ch-day{min-height:65px;border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:12px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}.ch-day b{font-size:18px}.ch-day span{font-size:10px;color:var(--muted)}.ch-day:hover{border-color:var(--accent)}.ch-on{outline:2px solid var(--accent);background:rgba(122,162,255,.12)}@media(max-width:600px){.ch-day{min-height:52px}.ch-day b{font-size:15px}.ch-day span{font-size:9px}}</style>';
+    document.querySelectorAll('.ch-day').forEach(function(b){b.onclick=function(){selectedDate=b.dataset.date;state.date=selectedDate;calendar();day()}});
+    document.getElementById('chPrev').onclick=function(){var z=month.split('-').map(Number),d=new Date(z[0],z[1]-2,1,12);month=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');selectedDate=month+'-01';calendar();day()};
+    document.getElementById('chNext').onclick=function(){var z=month.split('-').map(Number),d=new Date(z[0],z[1],1,12);month=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');selectedDate=month+'-01';calendar();day()};
+  }
+  async function day(){
+    var d=await api('/api/class-hour?date='+selectedDate),st=d.statuses||{},cnt={none:0,present:0,absent:0,sick:0,application:0};
+    state.students.forEach(function(x){cnt[st[String(x.id)]||'none']++});
+    var rows=state.students.map(function(x){var v=st[String(x.id)]||'none',m=meta(v);return '<button class="list-item ch-student" data-id="'+x.id+'" data-status="'+v+'" style="width:100%;text-align:left;color:inherit;cursor:pointer"><span style="font-size:23px">'+m[0]+'</span><div style="flex:1"><b>'+esc(x.name)+'</b><div class="small muted">'+m[1]+'</div></div></button>'}).join('');
+    document.getElementById('chDay').innerHTML='<div class="grid" style="margin-bottom:14px">'+metric('➖ Не отмечено',cnt.none)+metric('✅ Были',cnt.present)+metric('❌ Не были',cnt.absent)+metric('🤒 Болели',cnt.sick)+metric('📝 Заявление',cnt.application)+'</div><div class="card"><div class="section-head"><div><h2 style="margin:0">📅 '+fmtDate(selectedDate)+'</h2><div class="small muted">Нажмите на студента и выберите статус</div></div></div><div class="list">'+rows+'</div></div>';
+    document.querySelectorAll('.ch-student').forEach(function(b){b.onclick=function(){
+      var id=Number(b.dataset.id),name=studentName(id);
+      var opts=[['none','➖','Не отмечено'],['present','✅','Был'],['absent','❌','Не был'],['sick','🤒','Болел'],['application','📝','По заявлению']];
+      modal('<h3>🧑‍🏫 '+esc(name)+'</h3><div class="status-grid">'+opts.map(function(o){return '<button class="btn secondary" data-ch-status="'+o[0]+'">'+o[1]+' '+o[2]+'</button>'}).join('')+'</div>');
+      document.querySelectorAll('[data-ch-status]').forEach(function(x){x.onclick=async function(){await api('/api/class-hour',{method:'POST',body:JSON.stringify({date:selectedDate,student_id:id,status:x.dataset.chStatus})});closeModal();toast('Сохранено');day();calendar()}});
+    }});
+  }
+  await calendar();await day();
+}
 pages.lineup=async function(c){
   await loadStudents();
 
@@ -26018,7 +26063,7 @@ c.innerHTML='<div class="section-head"><h2>\u{1F465} \u041F\u043E\u043B\u044C\u0
  return '<div class="list-item"><div style="flex:1"><b>'+esc(u.display_name||u.login||u.telegram_user_id||'\u0410\u043A\u043A\u0430\u0443\u043D\u0442')+'</b>'+
  '<div class="small muted">'+esc(u.login||'\u0431\u0435\u0437 \u043B\u043E\u0433\u0438\u043D\u0430')+' \xB7 '+esc(u.role)+' \xB7 '+(Number(u.enabled)?'\u0430\u043A\u0442\u0438\u0432\u0435\u043D':'\u043E\u0442\u043A\u043B\u044E\u0447\u0451\u043D')+
  (u.telegram_user_id?' \xB7 TG '+esc(u.telegram_user_id):'')+'</div></div>'+
- (u.role!=='owner'?'<button class="btn secondary" data-toggle="'+u.id+'" data-enabled="'+Number(u.enabled)+'">'+(Number(u.enabled)?'\u041E\u0442\u043A\u043B\u044E\u0447\u0438\u0442\u044C':'\u0412\u043A\u043B\u044E\u0447\u0438\u0442\u044C')+'</button>':'<span class="pill">\u{1F451} \u0412\u043B\u0430\u0434\u0435\u043B\u0435\u0446</span>')+
+ (u.role!=='owner'?'<button class="btn secondary" data-toggle="'+u.id+'" data-enabled="'+Number(u.enabled)+'">'+(Number(u.enabled)?'\u041E\u0442\u043A\u043B\u044E\u0447\u0438\u0442\u044C':'\u0412\u043A\u043B\u044E\u0447\u0438\u0442\u044C')+'</button>':'<span class="pill">👑 Сардак Алексей</span>')+
  '</div>';
 }).join('')+'</div>';
 
@@ -26117,12 +26162,13 @@ pages.audit=async function(c){
     meal_delete:['🗑️','Удалена запись питания','Питание'],
     meal_day_toggle:['🍽️','Изменено питание за день','Питание'],
     meal_day_all:['🍽️','Изменено питание группы','Питание'],
-    lineup_status:['📢','Изменена отметка на линейке','Линейка']
+    lineup_status:['📢','Изменена отметка на линейке','Линейка'],
+    class_hour_status:['🧑‍🏫','Изменена отметка на классном часу','Классный час']
   };
 
   function info(x){return A[x.action]||['🛡️','Действие в системе','Система']}
   function actor(x){
-    var v=String(x.actor_user_id||'Система');
+    var v=String(x.actor_name||x.actor_user_id||'Система');
     if(v==='null'||v==='undefined'||v==='system')return 'Система';
     return v;
   }
@@ -26309,10 +26355,10 @@ async function initWebDb(env) {
     await env.DB.prepare(`
             INSERT OR IGNORE INTO web_accounts(
                 telegram_user_id, role, enabled, created_at, display_name
-            ) VALUES(?, 'owner', 1, ?, '\u0412\u043B\u0430\u0434\u0435\u043B\u0435\u0446')
+            ) VALUES(?, 'owner', 1, ?, 'Сардак Алексей')
         `).bind(ownerId, (/* @__PURE__ */ new Date()).toISOString()).run();
     await env.DB.prepare(`
-            UPDATE web_accounts SET role='owner', enabled=1
+            UPDATE web_accounts SET role='owner', enabled=1, display_name='Сардак Алексей'
             WHERE telegram_user_id=?
         `).bind(ownerId).run();
   }
@@ -27069,6 +27115,39 @@ async function handleWebApi(request, env, url) {
       await webAudit(env, user, "schedule_set", `day=${body.weekday} lesson=${body.lesson_no}`);
       return jsonResponse({ ok: true });
     }
+    if (path === "/api/class-hour" && request.method === "GET") {
+      await requireWeb(request,env,"view_journal");
+      const date=String(url.searchParams.get("date")||localDate());
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return jsonResponse({error:"Неверная дата"},400);
+      const rr=(await env.DB.prepare(`SELECT student_id,status FROM class_hour_attendance WHERE date=?`).bind(date).all()).results||[];
+      const statuses={};for(const r of rr)statuses[String(r.student_id)]=r.status;
+      return jsonResponse({date,statuses});
+    }
+    if (path === "/api/class-hour" && request.method === "POST") {
+      const actor=await requireWeb(request,env,"edit_attendance");
+      const date=String(body.date||""),studentId=Number(body.student_id),status=String(body.status||"none");
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(date))return jsonResponse({error:"Неверная дата"},400);
+      if(!["none","present","absent","sick","application"].includes(status))return jsonResponse({error:"Неверный статус"},400);
+      if(status==="none")await env.DB.prepare(`DELETE FROM class_hour_attendance WHERE date=? AND student_id=?`).bind(date,studentId).run();
+      else await env.DB.prepare(`INSERT INTO class_hour_attendance(date,student_id,status,updated_at) VALUES(?,?,?,?)
+        ON CONFLICT(date,student_id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at`).bind(date,studentId,status,new Date().toISOString()).run();
+      const st=await env.DB.prepare(`SELECT name FROM students WHERE id=?`).bind(studentId).first();
+      await webAudit(env,actor,"class_hour_status",date+" · "+String(st?.name||studentId)+" · "+status);
+      return jsonResponse({ok:true});
+    }
+    if (path === "/api/class-hour/calendar" && request.method === "GET") {
+      await requireWeb(request,env,"view_journal");
+      const month=String(url.searchParams.get("month")||localDate().slice(0,7));
+      if(!/^\d{4}-\d{2}$/.test(month))return jsonResponse({error:"Неверный месяц"},400);
+      const rows=(await env.DB.prepare(`SELECT date,COUNT(*) marked,
+        SUM(CASE WHEN status='present' THEN 1 ELSE 0 END) present,
+        SUM(CASE WHEN status='absent' THEN 1 ELSE 0 END) absent,
+        SUM(CASE WHEN status='sick' THEN 1 ELSE 0 END) sick,
+        SUM(CASE WHEN status='application' THEN 1 ELSE 0 END) application
+        FROM class_hour_attendance WHERE substr(date,1,7)=? GROUP BY date ORDER BY date`).bind(month).all()).results||[];
+      return jsonResponse({month,days:rows});
+    }
+
     if (path === "/api/lineup" && request.method === "GET") {
       await requireWeb(request,env,"view_journal");
       const date=String(url.searchParams.get("date")||""),dt=new Date(date+"T12:00:00Z");
@@ -27418,7 +27497,20 @@ async function handleWebApi(request, env, url) {
     }
     if (path === "/api/audit") {
       if (user.role !== "owner") return jsonResponse({ error: "\u0422\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u0430\u0434\u0435\u043B\u0435\u0446" }, 403);
-      return jsonResponse({ rows: (await env.DB.prepare(`SELECT * FROM audit_log ORDER BY id DESC LIMIT 300`).all()).results || [] });
+      return jsonResponse({ rows: (await env.DB.prepare(`
+        SELECT l.*,
+          COALESCE(
+            NULLIF(a.display_name,''),
+            NULLIF(TRIM(COALESCE(u.first_name,'') || ' ' || COALESCE(u.last_name,'')),''),
+            NULLIF(a.login,''),
+            l.actor_user_id,
+            'Система'
+          ) AS actor_name
+        FROM audit_log l
+        LEFT JOIN web_accounts a ON a.telegram_user_id=l.actor_user_id OR a.login=l.actor_user_id OR CAST(a.id AS TEXT)=l.actor_user_id
+        LEFT JOIN users u ON u.user_id=l.actor_user_id
+        ORDER BY l.id DESC LIMIT 300
+      `).all()).results || [] });
     }
     if (path === "/api/settings" && request.method === "GET") {
       const rows = (await env.DB.prepare(`SELECT key,value FROM app_settings WHERE key IN ('group_name','timezone')`).all()).results || [];
