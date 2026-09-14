@@ -23839,34 +23839,43 @@ async function showMainMenu(env, chatId, messageId = null) {
 }
 __name(showMainMenu, "showMainMenu");
 async function showExcelMenu(env, chatId, messageId) {
-  await editOrSend(env, chatId, messageId, `\u{1F4E4} <b>\u041E\u0422\u0427\u0401\u0422 EXCEL</b>
+  await editOrSend(env, chatId, messageId, `📤 <b>ОТЧЁТ EXCEL • ГРУППА 102</b>
 
-\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u043F\u0435\u0440\u0438\u043E\u0434.
+Выберите период.
 
-\u0411\u043E\u0442 \u0441\u043E\u0437\u0434\u0430\u0441\u0442 \u043D\u0430\u0441\u0442\u043E\u044F\u0449\u0438\u0439 \u0444\u0430\u0439\u043B <b>.xlsx</b> \u0441 \u0434\u0432\u0443\u043C\u044F \u043B\u0438\u0441\u0442\u0430\u043C\u0438:
+В файле будут:
+👨‍👩‍👦 <b>Для родителей</b> — всё по дням и парам
+📊 <b>Сводка</b> — итог по каждому студенту
+📋 <b>События</b> — опоздал / ушёл / отсутствовал / болел / по заявлению
+ℹ️ <b>Информация</b>
 
-\u{1F4CB} \u041F\u043E\u0441\u0435\u0449\u0430\u0435\u043C\u043E\u0441\u0442\u044C
-\u{1F4CA} \u0421\u0432\u043E\u0434\u043A\u0430 \u043F\u043E \u0441\u0442\u0443\u0434\u0435\u043D\u0442\u0430\u043C`, {
+❗ Одна полностью пропущенная пара = <b>2 часа</b>.`, {
     inline_keyboard: [
       [
         {
-          text: "\u{1F4C5} 7 \u0434\u043D\u0435\u0439",
+          text: "📆 Текущий месяц",
+          callback_data: "excel_period:month"
+        }
+      ],
+      [
+        {
+          text: "📅 7 дней",
           callback_data: "excel_period:7"
         },
         {
-          text: "\u{1F4C5} 30 \u0434\u043D\u0435\u0439",
+          text: "📅 30 дней",
           callback_data: "excel_period:30"
         }
       ],
       [
         {
-          text: "\u{1F4DA} \u0412\u0441\u0451 \u0432\u0440\u0435\u043C\u044F",
+          text: "📚 Всё время",
           callback_data: "excel_period:all"
         }
       ],
       [
         {
-          text: "\u{1F3E0} \u0413\u043B\u0430\u0432\u043D\u043E\u0435 \u043C\u0435\u043D\u044E",
+          text: "🏠 Главное меню",
           callback_data: "main"
         }
       ]
@@ -23875,301 +23884,385 @@ async function showExcelMenu(env, chatId, messageId) {
 }
 __name(showExcelMenu, "showExcelMenu");
 async function createExcelReport(env, period) {
+  await initLessonAttendance(env);
+
   let fromDate = null;
-  let periodName = "\u0412\u0441\u0451 \u0432\u0440\u0435\u043C\u044F";
+  let periodName = "Всё время";
   let filePeriod = "all";
-  if (period === "7") {
+
+  if (period === "month") {
+    fromDate = localDate().slice(0, 7) + "-01";
+    periodName = "Текущий месяц";
+    filePeriod = localDate().slice(0, 7);
+  } else if (period === "7") {
     fromDate = shiftDate(localDate(), -6);
-    periodName = "\u041F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 7 \u0434\u043D\u0435\u0439";
+    periodName = "Последние 7 дней";
     filePeriod = "7days";
-  }
-  if (period === "30") {
+  } else if (period === "30") {
     fromDate = shiftDate(localDate(), -29);
-    periodName = "\u041F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 30 \u0434\u043D\u0435\u0439";
+    periodName = "Последние 30 дней";
     filePeriod = "30days";
   }
-  let attendanceResult;
-  if (fromDate) {
-    attendanceResult = await env.DB.prepare(`
+
+  const whereDate = fromDate ? "AND la.date >= ?" : "";
+  const pairResult = fromDate
+    ? await env.DB.prepare(`
         SELECT
-          a.date,
-          s.name,
-          a.status,
-
-          CASE
-            WHEN d.student_id IS NULL
-            THEN 0
-            ELSE 1
-          END AS duty
-
-        FROM attendance a
-
-        JOIN students s
-          ON s.id = a.student_id
-
-        LEFT JOIN duty d
-          ON
-            d.student_id =
-              a.student_id
-            AND
-            d.date =
-              a.date
-
-        WHERE
-          a.date >= ?
-
-        ORDER BY
-          a.date ASC,
-          s.name COLLATE NOCASE
-      `).bind(fromDate).all();
-  } else {
-    attendanceResult = await env.DB.prepare(`
-        SELECT
-          a.date,
-          s.name,
-          a.status,
-
-          CASE
-            WHEN d.student_id IS NULL
-            THEN 0
-            ELSE 1
-          END AS duty
-
-        FROM attendance a
-
-        JOIN students s
-          ON s.id = a.student_id
-
-        LEFT JOIN duty d
-          ON
-            d.student_id =
-              a.student_id
-            AND
-            d.date =
-              a.date
-
-        ORDER BY
-          a.date ASC,
-          s.name COLLATE NOCASE
-      `).all();
-  }
-  const attendanceRows = [];
-  for (const row of attendanceResult.results || []) {
-    attendanceRows.push({
-      "\u0414\u0430\u0442\u0430": row.date,
-      "\u0421\u0442\u0443\u0434\u0435\u043D\u0442": row.name,
-      "\u0421\u0442\u0430\u0442\u0443\u0441": statusText(row.status),
-      "\u0414\u0435\u0436\u0443\u0440\u0441\u0442\u0432\u043E": Number(row.duty || 0) ? "\u0414\u0430" : ""
-    });
-  }
-  let statsResult;
-  if (fromDate) {
-    statsResult = await env.DB.prepare(`
-        SELECT
-          s.id,
-          s.name,
-
-          SUM(
-            CASE
-              WHEN a.status = 'present'
-              THEN 1 ELSE 0
-            END
-          ) AS present,
-
-          SUM(
-            CASE
-              WHEN a.status = 'absent'
-              THEN 1 ELSE 0
-            END
-          ) AS absent,
-
-          SUM(
-            CASE
-              WHEN a.status = 'late'
-              THEN 1 ELSE 0
-            END
-          ) AS late,
-
-          SUM(
-          CASE
-            WHEN status IN ('excused', 'sick')
-            THEN 1 ELSE 0
-          END
-        ) AS sick,
-
-        SUM(
-          CASE
-            WHEN status = 'application'
-            THEN 1 ELSE 0
-          END
-        ) AS application
-
-        FROM students s
-
-        LEFT JOIN attendance a
-          ON
-            a.student_id = s.id
-            AND
-            a.date >= ?
-
-        WHERE
-          s.active = 1
-
-        GROUP BY
-          s.id,
+          la.date,
+          la.lesson_no,
+          la.student_id,
+          la.status,
           s.name
-
-        ORDER BY
-          s.name COLLATE NOCASE
-      `).bind(fromDate).all();
-  } else {
-    statsResult = await env.DB.prepare(`
+        FROM lesson_attendance la
+        JOIN students s ON s.id = la.student_id
+        WHERE s.active = 1
+          ${whereDate}
+        ORDER BY la.date ASC, s.name COLLATE NOCASE, la.lesson_no ASC
+      `).bind(fromDate).all()
+    : await env.DB.prepare(`
         SELECT
-          s.id,
-          s.name,
-
-          SUM(
-            CASE
-              WHEN a.status = 'present'
-              THEN 1 ELSE 0
-            END
-          ) AS present,
-
-          SUM(
-            CASE
-              WHEN a.status = 'absent'
-              THEN 1 ELSE 0
-            END
-          ) AS absent,
-
-          SUM(
-            CASE
-              WHEN a.status = 'late'
-              THEN 1 ELSE 0
-            END
-          ) AS late,
-
-          SUM(
-          CASE
-            WHEN status IN ('excused', 'sick')
-            THEN 1 ELSE 0
-          END
-        ) AS sick,
-
-        SUM(
-          CASE
-            WHEN status = 'application'
-            THEN 1 ELSE 0
-          END
-        ) AS application
-
-        FROM students s
-
-        LEFT JOIN attendance a
-          ON a.student_id = s.id
-
-        WHERE
-          s.active = 1
-
-        GROUP BY
-          s.id,
+          la.date,
+          la.lesson_no,
+          la.student_id,
+          la.status,
           s.name
-
-        ORDER BY
-          s.name COLLATE NOCASE
+        FROM lesson_attendance la
+        JOIN students s ON s.id = la.student_id
+        WHERE s.active = 1
+        ORDER BY la.date ASC, s.name COLLATE NOCASE, la.lesson_no ASC
       `).all();
+
+  const studentsResult = await env.DB.prepare(`
+      SELECT id, name
+      FROM students
+      WHERE active = 1
+      ORDER BY name COLLATE NOCASE
+    `).all();
+
+  const pairRows = pairResult.results || [];
+  const students = studentsResult.results || [];
+
+  function excelStatus(status) {
+    const map = {
+      present: "✅ Был",
+      absent: "❌ Отсутствовал",
+      late: "⏰ Опоздал",
+      left: "🚪 Ушёл",
+      sick: "🤒 Болел",
+      excused: "🤒 Болел",
+      application: "📝 По заявлению"
+    };
+    return map[status] || "—";
   }
-  const summaryRows = [];
-  for (const row of statsResult.results || []) {
-    const present = Number(row.present || 0);
-    const absent = Number(row.absent || 0);
-    const late = Number(row.late || 0);
-    const excused = Number(row.excused || 0);
-    const counted = present + absent + late;
-    const percent = counted > 0 ? Math.round((present + late) / counted * 100) : 0;
-    const dutyResult = fromDate ? await env.DB.prepare(`
-            SELECT
-              COUNT(*) AS count
 
-            FROM duty
+  function missedHours(status) {
+    // Полностью пропущенная пара = 2 часа.
+    // Уважительная причина всё равно является пропущенной парой.
+    return ["absent", "sick", "excused", "application"].includes(status) ? 2 : 0;
+  }
 
-            WHERE
-              student_id = ?
-              AND
-              date >= ?
-          `).bind(row.id, fromDate).first() : await env.DB.prepare(`
-            SELECT
-              COUNT(*) AS count
+  function dateRu(date) {
+    const p = String(date || "").split("-");
+    return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : String(date || "");
+  }
 
-            FROM duty
+  let maxLesson = 4;
+  for (const row of pairRows) {
+    maxLesson = Math.max(maxLesson, Number(row.lesson_no || 0));
+  }
+  maxLesson = Math.min(Math.max(maxLesson, 4), 8);
 
-            WHERE
-              student_id = ?
-          `).bind(row.id).first();
-    summaryRows.push({
-      "\u0421\u0442\u0443\u0434\u0435\u043D\u0442": row.name,
-      "\u041F\u0440\u0438\u0441\u0443\u0442\u0441\u0442\u0432\u043E\u0432\u0430\u043B": present,
-      "\u041E\u0442\u0441\u0443\u0442\u0441\u0442\u0432\u043E\u0432\u0430\u043B": absent,
-      "\u041E\u043F\u043E\u0437\u0434\u0430\u043B": late,
-      "\u0411\u043E\u043B\u0435\u0435\u0442": excused,
-      "\u041F\u043E\u0441\u0435\u0449\u0430\u0435\u043C\u043E\u0441\u0442\u044C %": percent,
-      "\u0414\u0435\u0436\u0443\u0440\u0441\u0442\u0432": Number(dutyResult?.count || 0)
+  // ---------- ДАННЫЕ ПО ДНЯМ ----------
+  const byDayStudent = new Map();
+
+  for (const row of pairRows) {
+    const key = `${row.date}|${row.student_id}`;
+    if (!byDayStudent.has(key)) {
+      byDayStudent.set(key, {
+        date: row.date,
+        studentId: Number(row.student_id),
+        name: row.name,
+        lessons: {},
+        hours: 0,
+        absent: 0,
+        late: 0,
+        left: 0,
+        sick: 0,
+        application: 0
+      });
+    }
+
+    const x = byDayStudent.get(key);
+    x.lessons[Number(row.lesson_no)] = row.status;
+    x.hours += missedHours(row.status);
+
+    if (row.status === "absent") x.absent++;
+    if (row.status === "late") x.late++;
+    if (row.status === "left") x.left++;
+    if (row.status === "sick" || row.status === "excused") x.sick++;
+    if (row.status === "application") x.application++;
+  }
+
+  const parentHeader = [
+    "Дата",
+    "Студент",
+    ...Array.from({ length: maxLesson }, (_, i) => `${i + 1} пара`),
+    "Пропущено часов",
+    "Опоздал",
+    "Ушёл"
+  ];
+
+  const parentRows = [
+    ["ПОСЕЩАЕМОСТЬ • ГРУППА 102"],
+    [`Период: ${periodName}`],
+    ["1 полностью пропущенная пара = 2 часа"],
+    [],
+    parentHeader
+  ];
+
+  for (const x of [...byDayStudent.values()].sort((a, b) =>
+    a.date.localeCompare(b.date) || a.name.localeCompare(b.name, "ru")
+  )) {
+    const row = [dateRu(x.date), x.name];
+    for (let lesson = 1; lesson <= maxLesson; lesson++) {
+      row.push(x.lessons[lesson] ? excelStatus(x.lessons[lesson]) : "");
+    }
+    row.push(x.hours);
+    row.push(x.late ? x.late : "");
+    row.push(x.left ? x.left : "");
+    parentRows.push(row);
+  }
+
+  if (parentRows.length === 5) {
+    const empty = ["Нет данных за выбранный период", ""];
+    while (empty.length < parentHeader.length) empty.push("");
+    parentRows.push(empty);
+  }
+
+  // ---------- СОБЫТИЯ ----------
+  const eventRows = [
+    ["Дата", "Студент", "Пара", "Событие", "Пропущено часов"]
+  ];
+
+  for (const row of pairRows) {
+    if (row.status === "present") continue;
+    eventRows.push([
+      dateRu(row.date),
+      row.name,
+      Number(row.lesson_no),
+      excelStatus(row.status),
+      missedHours(row.status)
+    ]);
+  }
+
+  if (eventRows.length === 1) {
+    eventRows.push(["", "Нарушений и пропусков нет", "", "", 0]);
+  }
+
+  // ---------- СВОДКА ПО СТУДЕНТАМ ----------
+  const totals = new Map();
+  for (const st of students) {
+    totals.set(Number(st.id), {
+      name: st.name,
+      absent: 0,
+      sick: 0,
+      application: 0,
+      late: 0,
+      left: 0,
+      missedPairs: 0,
+      hours: 0
     });
   }
-  if (attendanceRows.length === 0) {
-    attendanceRows.push({
-      "\u0414\u0430\u0442\u0430": "",
-      "\u0421\u0442\u0443\u0434\u0435\u043D\u0442": "",
-      "\u0421\u0442\u0430\u0442\u0443\u0441": "",
-      "\u0414\u0435\u0436\u0443\u0440\u0441\u0442\u0432\u043E": ""
-    });
+
+  for (const row of pairRows) {
+    const x = totals.get(Number(row.student_id));
+    if (!x) continue;
+
+    if (row.status === "absent") x.absent++;
+    if (row.status === "sick" || row.status === "excused") x.sick++;
+    if (row.status === "application") x.application++;
+    if (row.status === "late") x.late++;
+    if (row.status === "left") x.left++;
+
+    const h = missedHours(row.status);
+    if (h > 0) {
+      x.missedPairs++;
+      x.hours += h;
+    }
   }
+
+  const summaryRows = [
+    ["СВОДКА ПОСЕЩАЕМОСТИ • ГРУППА 102"],
+    [`Период: ${periodName}`],
+    ["Пропущенные часы считаются из расчёта: 1 пара = 2 часа"],
+    [],
+    [
+      "Студент",
+      "Отсутствовал, пар",
+      "Болел, пар",
+      "По заявлению, пар",
+      "Опоздал, раз",
+      "Ушёл, раз",
+      "Всего пропущено пар",
+      "Всего пропущено часов"
+    ]
+  ];
+
+  for (const x of [...totals.values()].sort((a, b) =>
+    a.name.localeCompare(b.name, "ru")
+  )) {
+    summaryRows.push([
+      x.name,
+      x.absent,
+      x.sick,
+      x.application,
+      x.late,
+      x.left,
+      x.missedPairs,
+      x.hours
+    ]);
+  }
+
+  // Итог по группе
+  const group = [...totals.values()].reduce((a, x) => {
+    a.absent += x.absent;
+    a.sick += x.sick;
+    a.application += x.application;
+    a.late += x.late;
+    a.left += x.left;
+    a.missedPairs += x.missedPairs;
+    a.hours += x.hours;
+    return a;
+  }, {
+    absent: 0,
+    sick: 0,
+    application: 0,
+    late: 0,
+    left: 0,
+    missedPairs: 0,
+    hours: 0
+  });
+
+  summaryRows.push([]);
+  summaryRows.push([
+    "ИТОГО ПО ГРУППЕ",
+    group.absent,
+    group.sick,
+    group.application,
+    group.late,
+    group.left,
+    group.missedPairs,
+    group.hours
+  ]);
+
+  // ---------- EXCEL ----------
   const workbook = utils.book_new();
-  const attendanceSheet = utils.json_to_sheet(attendanceRows);
-  const summarySheet = utils.json_to_sheet(summaryRows);
-  attendanceSheet["!cols"] = [
-    { wch: 14 },
+  workbook.Props = {
+    Title: "Посещаемость группы 102",
+    Subject: `Отчёт для родителей • ${periodName}`,
+    Author: "Группа 102",
+    Company: "Группа 102",
+    CreatedDate: new Date()
+  };
+
+  const parentSheet = utils.aoa_to_sheet(parentRows);
+  const summarySheet = utils.aoa_to_sheet(summaryRows);
+  const eventSheet = utils.aoa_to_sheet(eventRows);
+  const infoSheet = utils.aoa_to_sheet([
+    ["ОТЧЁТ ДЛЯ РОДИТЕЛЕЙ"],
+    ["Группа", "102"],
+    ["Период", periodName],
+    ["Дата создания", formatDateLong(localDate())],
+    ["Расчёт часов", "1 полностью пропущенная пара = 2 часа"],
+    [],
+    ["Обозначения"],
+    ["✅ Был", "присутствовал на паре"],
+    ["❌ Отсутствовал", "пропущено 2 часа"],
+    ["⏰ Опоздал", "опоздание"],
+    ["🚪 Ушёл", "ушёл с пары"],
+    ["🤒 Болел", "уважительная причина, пропущено 2 часа"],
+    ["📝 По заявлению", "уважительная причина, пропущено 2 часа"]
+  ]);
+
+  // Ширины столбцов и удобство чтения
+  parentSheet["!cols"] = [
+    { wch: 13 },
     { wch: 32 },
-    { wch: 20 },
-    { wch: 14 }
+    ...Array.from({ length: maxLesson }, () => ({ wch: 19 })),
+    { wch: 19 },
+    { wch: 11 },
+    { wch: 11 }
   ];
   summarySheet["!cols"] = [
     { wch: 32 },
-    { wch: 16 },
-    { wch: 16 },
-    { wch: 12 },
-    { wch: 16 },
     { wch: 18 },
-    { wch: 12 }
-  ];
-  utils.book_append_sheet(workbook, attendanceSheet, "\u041F\u043E\u0441\u0435\u0449\u0430\u0435\u043C\u043E\u0441\u0442\u044C");
-  utils.book_append_sheet(workbook, summarySheet, "\u0421\u0432\u043E\u0434\u043A\u0430");
-  const infoSheet = utils.aoa_to_sheet([
-    [
-      "\u0416\u0443\u0440\u043D\u0430\u043B",
-      "\u0413\u0440\u0443\u043F\u043F\u0430 \u2116102"
-    ],
-    [
-      "\u041F\u0435\u0440\u0438\u043E\u0434",
-      periodName
-    ],
-    [
-      "\u0414\u0430\u0442\u0430 \u0441\u043E\u0437\u0434\u0430\u043D\u0438\u044F",
-      formatDateLong(localDate())
-    ]
-  ]);
-  infoSheet["!cols"] = [
+    { wch: 14 },
     { wch: 20 },
-    { wch: 35 }
+    { wch: 14 },
+    { wch: 12 },
+    { wch: 22 },
+    { wch: 24 }
   ];
-  utils.book_append_sheet(workbook, infoSheet, "\u0418\u043D\u0444\u043E\u0440\u043C\u0430\u0446\u0438\u044F");
+  eventSheet["!cols"] = [
+    { wch: 13 },
+    { wch: 32 },
+    { wch: 9 },
+    { wch: 23 },
+    { wch: 20 }
+  ];
+  infoSheet["!cols"] = [
+    { wch: 28 },
+    { wch: 48 }
+  ];
+
+  // Заголовки как единые красивые полосы
+  parentSheet["!merges"] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: parentHeader.length - 1 } },
+    { s: { r: 1, c: 0 }, e: { r: 1, c: parentHeader.length - 1 } },
+    { s: { r: 2, c: 0 }, e: { r: 2, c: parentHeader.length - 1 } }
+  ];
+  summarySheet["!merges"] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: 7 } },
+    { s: { r: 1, c: 0 }, e: { r: 1, c: 7 } },
+    { s: { r: 2, c: 0 }, e: { r: 2, c: 7 } }
+  ];
+  infoSheet["!merges"] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: 1 } }
+  ];
+
+  // Высота строк
+  parentSheet["!rows"] = [
+    { hpt: 28 }, { hpt: 22 }, { hpt: 20 }, { hpt: 8 }, { hpt: 25 }
+  ];
+  summarySheet["!rows"] = [
+    { hpt: 28 }, { hpt: 22 }, { hpt: 20 }, { hpt: 8 }, { hpt: 30 }
+  ];
+  eventSheet["!rows"] = [{ hpt: 25 }];
+
+  // Автофильтры на таблицах
+  parentSheet["!autofilter"] = {
+    ref: `A5:${utils.encode_col(parentHeader.length - 1)}${parentRows.length}`
+  };
+  summarySheet["!autofilter"] = {
+    ref: `A5:H${Math.max(5, summaryRows.length - 2)}`
+  };
+  eventSheet["!autofilter"] = {
+    ref: `A1:E${eventRows.length}`
+  };
+
+  utils.book_append_sheet(workbook, parentSheet, "Для родителей");
+  utils.book_append_sheet(workbook, summarySheet, "Сводка");
+  utils.book_append_sheet(workbook, eventSheet, "События");
+  utils.book_append_sheet(workbook, infoSheet, "Информация");
+
   const buffer = writeSync(workbook, {
     type: "array",
     bookType: "xlsx"
   });
+
   return {
     buffer,
-    filename: `journal_102_${localDate()}_${filePeriod}.xlsx`
+    filename: `group_102_attendance_${filePeriod}_${localDate()}.xlsx`
   };
 }
 __name(createExcelReport, "createExcelReport");
@@ -24204,6 +24297,7 @@ async function handlePart6Callback(data, env, chatId, messageId, userId) {
   if (data.startsWith("excel_period:")) {
     const period = data.split(":")[1];
     if (![
+      "month",
       "7",
       "30",
       "all"
@@ -25698,15 +25792,14 @@ pages.meals=async function(c){
   async function renderDay(){
     var d=await api('/api/meals/day?date='+selectedDate),r=d.rows||[];
     var chosen=r.filter(function(x){return Number(x.selected)===1}).length;
-    var benefits=r.filter(function(x){return Number(x.selected)===1&&Number(x.benefit)===1&&Number(x.orphan)!==1}).length;
+    var benefits=r.filter(function(x){return Number(x.selected)===1&&Number(x.benefit)===1}).length;
     var orphans=r.filter(function(x){return Number(x.selected)===1&&Number(x.orphan)===1}).length;
-    var paid=r.filter(function(x){return Number(x.selected)===1&&Number(x.benefit)!==1&&Number(x.orphan)!==1}).length;
     document.getElementById('mealDay').innerHTML=
-      '<div class="card"><div class="section-head"><div><h2 style="margin:0">📅 '+fmtDate(selectedDate)+'</h2><div class="muted">Отмечено '+chosen+' · льгот '+benefits+' · сирот '+orphans+' · платников '+paid+'</div></div>'+
+      '<div class="card"><div class="section-head"><div><h2 style="margin:0">📅 '+fmtDate(selectedDate)+'</h2><div class="muted">Отмечено '+chosen+' · льгот '+benefits+' · сирот '+orphans+'</div></div>'+
       '<div style="display:flex;gap:7px;flex-wrap:wrap"><button class="btn secondary" id="mealAll">✅ Все</button><button class="btn ghost" id="mealClear">Очистить</button><button class="btn" id="mealDayReport">🖨 Отчёт за день</button></div></div>'+
       '<div class="list">'+(r.length?r.map(function(x){return '<button class="list-item mealToggle" data-id="'+x.student_id+'" data-sel="'+Number(x.selected)+'" style="width:100%;text-align:left;color:inherit;cursor:pointer">'+
         '<span style="font-size:24px">'+(Number(x.selected)?'✅':'▫️')+'</span><div style="flex:1"><b>'+esc(x.name)+'</b><div class="small muted">'+
-        (Number(x.orphan)?'🧒 Сирота':(Number(x.benefit)?'⭐ Льгота':'🥣 Платник'))+(x.note?' · '+esc(x.note):'')+
+        (Number(x.benefit)?'⭐ Льгота':'🥣 Без льготы')+(Number(x.orphan)?' · 🧒 Сирота':'')+(x.note?' · '+esc(x.note):'')+
         '</div></div></button>'}).join(''):'<div class="muted">Сначала добавьте учеников в «Список питания».</div>')+'</div></div>';
 
     document.querySelectorAll('.mealToggle').forEach(function(b){b.onclick=async function(){
@@ -25727,18 +25820,18 @@ pages.meals=async function(c){
   };
 
   function renderProfiles(){
-    var benefits=rows.filter(function(x){return Number(x.benefit)===1&&Number(x.orphan)!==1}).length;
+    var benefits=rows.filter(function(x){return Number(x.benefit)===1}).length;
     var orphans=rows.filter(function(x){return Number(x.orphan)===1}).length;
-    var paid=rows.filter(function(x){return Number(x.benefit)!==1&&Number(x.orphan)!==1}).length;
     modal(
       '<h3>⚙️ Список питания</h3>'+
-      '<div class="small muted" style="margin-bottom:10px">Всего '+rows.length+' · льгот '+benefits+' · сирот '+orphans+' · платников '+paid+'</div>'+
+      '<div class="small muted" style="margin-bottom:10px">Всего '+rows.length+' · льгот '+benefits+' · сирот '+orphans+'</div>'+
       '<button class="btn" id="mealProfileAdd" style="width:100%;margin-bottom:12px">➕ Добавить ученика</button>'+
       '<div class="list">'+
       (rows.length?rows.map(function(x){
         return '<div class="list-item">'+
           '<div style="flex:1"><b>'+esc(x.name)+'</b><div class="small muted">'+
-          (Number(x.orphan)?'🧒 Сирота':(Number(x.benefit)?'⭐ Льгота':'🥣 Платник'))+
+          (Number(x.benefit)?'⭐ Льгота':'🥣 Без льготы')+
+          (Number(x.orphan)?' · 🧒 Сирота':'')+
           (x.note?' · '+esc(x.note):'')+
           '</div></div>'+
           '<button class="btn secondary mealProfileEdit" data-id="'+x.student_id+'">Изменить</button>'+
@@ -25755,8 +25848,11 @@ pages.meals=async function(c){
         '<div class="field"><label>Студент</label><select id="mealStudent">'+
         available.map(function(x){return '<option value="'+x.id+'">'+esc(x.name)+'</option>';}).join('')+
         '</select></div>'+
-        '<div class="field"><label>Категория питания</label><select id="mealCategory">'+
-        '<option value="paid">🥣 Платник</option><option value="benefit">⭐ Льготник</option><option value="orphan">🧒 Сирота</option>'+
+        '<div class="field"><label>Категория питания</label><select id="mealBenefit">'+
+        '<option value="0">🥣 Без льготы</option><option value="1">⭐ Льгота</option>'+
+        '</select></div>'+
+        '<div class="field"><label>Сирота</label><select id="mealOrphan">'+
+        '<option value="0">Нет</option><option value="1">🧒 Да</option>'+
         '</select></div>'+
         '<div class="field"><label>Примечание</label><input id="mealNote" maxlength="300" placeholder="Необязательно"></div>'+
         '<button class="btn" id="mealProfileSave" style="width:100%">Добавить</button>'
@@ -25764,8 +25860,8 @@ pages.meals=async function(c){
       document.getElementById('mealProfileSave').onclick=async function(){
         await api('/api/meals',{method:'POST',body:JSON.stringify({
           student_id:Number(document.getElementById('mealStudent').value),
-          benefit:document.getElementById('mealCategory').value==='benefit',
-          orphan:document.getElementById('mealCategory').value==='orphan',
+          benefit:document.getElementById('mealBenefit').value==='1',
+          orphan:document.getElementById('mealOrphan').value==='1',
           note:document.getElementById('mealNote').value
         })});
         closeModal();toast('Студент добавлен');go('meals');
@@ -25778,10 +25874,13 @@ pages.meals=async function(c){
         if(!x)return;
         modal(
           '<h3>🍽️ '+esc(x.name)+'</h3>'+
-          '<div class="field"><label>Категория питания</label><select id="mealCategory">'+
-          '<option value="paid" '+(!Number(x.benefit)&&!Number(x.orphan)?'selected':'')+'>🥣 Платник</option>'+
-          '<option value="benefit" '+(Number(x.benefit)&&!Number(x.orphan)?'selected':'')+'>⭐ Льготник</option>'+
-          '<option value="orphan" '+(Number(x.orphan)?'selected':'')+'>🧒 Сирота</option>'+
+          '<div class="field"><label>Категория питания</label><select id="mealBenefit">'+
+          '<option value="0" '+(!Number(x.benefit)?'selected':'')+'>🥣 Без льготы</option>'+
+          '<option value="1" '+(Number(x.benefit)?'selected':'')+'>⭐ Льгота</option>'+
+          '</select></div>'+
+          '<div class="field"><label>Сирота</label><select id="mealOrphan">'+
+          '<option value="0" '+(!Number(x.orphan)?'selected':'')+'>Нет</option>'+
+          '<option value="1" '+(Number(x.orphan)?'selected':'')+'>🧒 Да</option>'+
           '</select></div>'+
           '<div class="field"><label>Примечание</label><input id="mealNote" maxlength="300" value="'+esc(x.note||'')+'" placeholder="Необязательно"></div>'+
           '<button class="btn" id="mealProfileSave" style="width:100%">Сохранить</button>'
@@ -25789,8 +25888,8 @@ pages.meals=async function(c){
         document.getElementById('mealProfileSave').onclick=async function(){
           await api('/api/meals',{method:'POST',body:JSON.stringify({
             student_id:Number(x.student_id),
-            benefit:document.getElementById('mealCategory').value==='benefit',
-            orphan:document.getElementById('mealCategory').value==='orphan',
+            benefit:document.getElementById('mealBenefit').value==='1',
+            orphan:document.getElementById('mealOrphan').value==='1',
             note:document.getElementById('mealNote').value
           })});
           closeModal();toast('Сохранено');go('meals');
@@ -27305,8 +27404,8 @@ async function handleWebApi(request, env, url) {
         bindValue=m;
         summary=(await env.DB.prepare(`
           SELECT d.date,COUNT(*) total,
-            SUM(CASE WHEN m.benefit=1 AND m.orphan=0 THEN 1 ELSE 0 END) benefit,
-            SUM(CASE WHEN m.benefit=0 AND m.orphan=0 THEN 1 ELSE 0 END) regular,
+            SUM(CASE WHEN m.benefit=1 THEN 1 ELSE 0 END) benefit,
+            SUM(CASE WHEN m.benefit=0 THEN 1 ELSE 0 END) regular,
             SUM(CASE WHEN m.orphan=1 THEN 1 ELSE 0 END) orphan
           FROM meal_days d JOIN meals m ON m.student_id=d.student_id
           WHERE substr(d.date,1,7)=?
@@ -27334,7 +27433,7 @@ async function handleWebApi(request, env, url) {
           bodyHtml+=`<h2>${escH(cur.split("-").reverse().join("."))}</h2><table><thead><tr><th>№</th><th>ФИО</th><th>Категория</th><th>Сирота</th><th>Примечание</th></tr></thead><tbody>`;
         }
         const same=rows.filter(x=>x.date===r.date),idx=same.indexOf(r)+1;
-        bodyHtml+=`<tr><td>${idx}</td><td>${escH(r.name)}</td><td>${r.orphan?"Сирота":(r.benefit?"Льгота":"Платник")}</td><td>${r.orphan?"Да":"Нет"}</td><td>${escH(r.note||"")}</td></tr>`;
+        bodyHtml+=`<tr><td>${idx}</td><td>${escH(r.name)}</td><td>${r.benefit?"Льгота":"Без льготы"}</td><td>${r.orphan?"Да":"Нет"}</td><td>${escH(r.note||"")}</td></tr>`;
         if(r===same[same.length-1])bodyHtml+=`</tbody></table>`;
       }
       if(!rows.length)bodyHtml=`<div class="empty">За выбранный период питание не отмечено.</div>`;
