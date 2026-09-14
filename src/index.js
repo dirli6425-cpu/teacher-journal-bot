@@ -24445,6 +24445,10 @@ var originalInitDb = initDb;
 initDb = /* @__PURE__ */ __name(async function(env) {
   await originalInitDb(env);
   await initLessonAttendance(env);
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS lineup_attendance (
+    date TEXT NOT NULL, student_id INTEGER NOT NULL, status TEXT NOT NULL, updated_at TEXT NOT NULL,
+    PRIMARY KEY(date,student_id)
+  )`).run();
 }, "initDb");
 function lessonsCountForDate(date) {
   const day = dateWeekday(date);
@@ -25608,7 +25612,7 @@ button,input,select,textarea{font:inherit}.hidden{display:none!important}.muted{
 (function(){
 var state={me:null,page:'dashboard',students:[],date:new Date().toISOString().slice(0,10),month:new Date().toISOString().slice(0,7)};
 var nav=[
- ['dashboard','\u{1F3E0}','\u0413\u043B\u0430\u0432\u043D\u0430\u044F'],['journal','\u{1F465}','\u0416\u0443\u0440\u043D\u0430\u043B'],['pairs','\u{1F4DA}','\u041F\u043E \u043F\u0430\u0440\u0430\u043C'],['students','\u{1F464}','\u0421\u0442\u0443\u0434\u0435\u043D\u0442\u044B'],['meals','\u{1F37D}\uFE0F','\u041F\u0438\u0442\u0430\u043D\u0438\u0435'],
+ ['dashboard','\u{1F3E0}','\u0413\u043B\u0430\u0432\u043D\u0430\u044F'],['journal','\u{1F465}','\u0416\u0443\u0440\u043D\u0430\u043B'],['pairs','\u{1F4DA}','\u041F\u043E \u043F\u0430\u0440\u0430\u043C'],['students','\u{1F464}','\u0421\u0442\u0443\u0434\u0435\u043D\u0442\u044B'],['lineup','📢','Линейка'],['meals','\u{1F37D}\uFE0F','\u041F\u0438\u0442\u0430\u043D\u0438\u0435'],
  ['calendar','\u{1F4C5}','\u041A\u0430\u043B\u0435\u043D\u0434\u0430\u0440\u044C'],['health','\u{1F912}','\u0411\u043E\u043B\u0435\u0437\u043D\u0438 \u0438 \u0437\u0430\u044F\u0432\u043B\u0435\u043D\u0438\u044F'],['duty','\u{1F9F9}','\u0414\u0435\u0436\u0443\u0440\u0441\u0442\u0432\u043E'],
  ['schedule','\u{1F5D3}\uFE0F','\u0420\u0430\u0441\u043F\u0438\u0441\u0430\u043D\u0438\u0435'],['parents','\u{1F468}\u200D\u{1F469}\u200D\u{1F466}','\u0420\u043E\u0434\u0438\u0442\u0435\u043B\u044F\u043C'],['analytics','\u{1F4CA}','\u0410\u043D\u0430\u043B\u0438\u0442\u0438\u043A\u0430'],
  ['reports','\u{1F4C4}','\u041E\u0442\u0447\u0451\u0442\u044B'],['online','\u{1F7E2}','\u041E\u043D\u043B\u0430\u0439\u043D'],['users','\u{1F465}','\u041F\u043E\u043B\u044C\u0437\u043E\u0432\u0430\u0442\u0435\u043B\u0438'],
@@ -25817,6 +25821,21 @@ pages.meals=async function(c){
 };
 pages.dashboard=async function(c){var d=await api('/api/dashboard');c.innerHTML='<div class="grid">'+metric('\u{1F465} \u0423\u0447\u0435\u043D\u0438\u043A\u043E\u0432',d.students)+metric('\u274C \u041D\u0435\u0442 \u0441\u0435\u0433\u043E\u0434\u043D\u044F',d.absent)+metric('\u{1F912} \u0411\u043E\u043B\u0435\u044E\u0442',d.sick)+metric('\u{1F4DD} \u041F\u043E \u0437\u0430\u044F\u0432\u043B\u0435\u043D\u0438\u044E',d.application)+'</div><div class="grid" style="margin-top:14px;grid-template-columns:2fr 1fr"><div class="card"><div class="section-head"><h2>\u0421\u0435\u0433\u043E\u0434\u043D\u044F</h2></div><div class="list">'+(d.today.map(function(x){return '<div class="list-item"><div>'+x.icon+'</div><div><b>'+esc(x.name)+'</b><div class="muted small">'+esc(x.text)+'</div></div></div>'}).join('')||'<div class="muted">\u0421\u043E\u0431\u044B\u0442\u0438\u0439 \u043D\u0435\u0442</div>')+'</div></div><div class="card"><h2 style="margin-top:0">\u{1F9F9} \u0414\u0435\u0436\u0443\u0440\u043D\u044B\u0435</h2><div>'+((d.duty||[]).map(function(x){return '<div class="pill" style="margin:3px">'+esc(x.name)+'</div>'}).join('')||'<span class="muted">\u041D\u0435 \u043D\u0430\u0437\u043D\u0430\u0447\u0435\u043D\u044B</span>')+'</div></div></div>'}
 pages.journal=async function(c){await loadStudents();var d=await api('/api/attendance?date='+state.date);var rows=state.students.map(function(s){var st=d.statuses[String(s.id)]||'none';return '<tr><td><div class="student"><div class="avatar">'+esc(s.name[0])+'</div><b>'+esc(s.name)+'</b></div></td><td>'+statusButton(st,s.id,'day',state.date)+'</td></tr>'}).join('');c.innerHTML='<div class="section-head"><h2>\u{1F465} \u041F\u043E\u0441\u0435\u0449\u0430\u0435\u043C\u043E\u0441\u0442\u044C</h2><div class="actions"><input type="date" id="journalDate" value="'+state.date+'"><button class="btn secondary" id="allPresent">\u2705 \u0412\u0441\u0435 \u0435\u0441\u0442\u044C</button></div></div><div class="table-wrap"><table class="table"><thead><tr><th>\u0423\u0447\u0435\u043D\u0438\u043A</th><th>\u0421\u0442\u0430\u0442\u0443\u0441</th></tr></thead><tbody>'+rows+'</tbody></table></div>';document.getElementById('journalDate').onchange=function(){state.date=this.value;go('journal')};document.getElementById('allPresent').onclick=async function(){await api('/api/attendance/all-present',{method:'POST',body:JSON.stringify({date:state.date})});toast('\u0412\u0441\u0435 \u043E\u0442\u043C\u0435\u0447\u0435\u043D\u044B');go('journal')};bindStatusButtons()}
+pages.lineup=async function(c){
+  await loadStudents();
+  function mondayOf(v){var d=new Date(v+'T12:00:00');var n=d.getDay();d.setDate(d.getDate()-((n+6)%7));return d.toISOString().slice(0,10)}
+  var date=mondayOf(state.date),d=await api('/api/lineup?date='+date),st=d.statuses||{};
+  function meta(x){return x==='absent'?['❌','Не был']:x==='sick'?['🤒','Болеет']:x==='application'?['📝','По заявлению']:['✅','Был']}
+  var counts={present:0,absent:0,sick:0,application:0};
+  state.students.forEach(function(x){counts[st[String(x.id)]||'present']++});
+  var rows=state.students.map(function(x){var v=st[String(x.id)]||'present',m=meta(v);return '<button class="list-item lineupStudent" data-id="'+x.id+'" data-status="'+v+'" style="width:100%;text-align:left;color:inherit;cursor:pointer"><span style="font-size:23px">'+m[0]+'</span><div style="flex:1"><b>'+esc(x.name)+'</b><div class="small muted">'+m[1]+'</div></div></button>'}).join('');
+  c.innerHTML='<div class="section-head"><div><h2>📢 Линейка</h2><div class="muted">По умолчанию все присутствуют — отмечайте только исключения</div></div><div class="actions"><input type="date" id="lineupDate" value="'+date+'"><button class="btn secondary" id="lineupSummary">📊 Сводка</button></div></div>'+
+  '<div class="grid" style="margin-bottom:14px">'+metric('✅ Были',counts.present)+metric('❌ Не были',counts.absent)+metric('🤒 Болели',counts.sick)+metric('📝 Заявление',counts.application)+'</div>'+
+  '<div class="card"><div class="small muted" style="margin-bottom:10px">Нажимайте только на отсутствующих. Статус: Был → Не был → Болел → По заявлению → Был.</div><div class="list">'+rows+'</div></div>';
+  document.getElementById('lineupDate').onchange=function(){var md=mondayOf(this.value);state.date=md;go('lineup')};
+  document.querySelectorAll('.lineupStudent').forEach(function(b){b.onclick=async function(){var order=['present','absent','sick','application'],i=order.indexOf(b.dataset.status),next=order[(i+1)%order.length];await api('/api/lineup',{method:'POST',body:JSON.stringify({date:date,student_id:Number(b.dataset.id),status:next})});go('lineup')}});
+  document.getElementById('lineupSummary').onclick=async function(){var q=await api('/api/lineup/summary'),n=Number(q.recordedMondays||0);modal('<h3>📊 Сводка по линейкам</h3><div class="small muted" style="margin-bottom:12px">Отмеченных понедельников: '+n+'</div><div class="list">'+q.rows.map(function(x){var a=Number(x.absent||0),si=Number(x.sick||0),ap=Number(x.application||0),bad=a+si+ap,p=Math.max(0,n-bad);return '<div class="list-item"><div style="flex:1"><b>'+esc(x.name)+'</b><div class="small muted">✅ '+p+' · ❌ '+a+' · 🤒 '+si+' · 📝 '+ap+'</div></div></div>'}).join('')+'</div>')};
+}
 pages.pairs=async function(c){await loadStudents();var d=await api('/api/pairs?date='+state.date);var lessons=d.lessons||4;var head='<th>\u0423\u0447\u0435\u043D\u0438\u043A</th>';for(var l=1;l<=lessons;l++)head+='<th>'+l+' \u043F\u0430\u0440\u0430</th>';var rows=state.students.map(function(s){var t='<tr><td><b>'+esc(s.name)+'</b></td>';for(var l=1;l<=lessons;l++){var st=(d.statuses[String(l)]||{})[String(s.id)]||'none';t+='<td>'+statusButton(st,s.id,'pair',state.date,l)+'</td>'}return t+'</tr>'}).join('');c.innerHTML='<div class="section-head"><h2>\u{1F4DA} \u041F\u043E \u043F\u0430\u0440\u0430\u043C</h2><div class="actions"><input type="date" id="pairDate" value="'+state.date+'"></div></div><div class="table-wrap"><table class="table"><thead><tr>'+head+'</tr></thead><tbody>'+rows+'</tbody></table></div>';document.getElementById('pairDate').onchange=function(){state.date=this.value;go('pairs')};bindStatusButtons()}
 pages.students=async function(c){await loadStudents();c.innerHTML='<div class="section-head"><h2>\u{1F464} \u0421\u0442\u0443\u0434\u0435\u043D\u0442\u044B</h2><div class="actions"><button class="btn" id="addStudent">+ \u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C</button></div></div><div class="list">'+state.students.map(function(s){return '<div class="list-item"><div class="avatar">'+esc(s.name[0])+'</div><div style="flex:1"><b>'+esc(s.name)+'</b></div><button class="btn secondary" data-card="'+s.id+'">\u041A\u0430\u0440\u0442\u043E\u0447\u043A\u0430</button></div>'}).join('')+'</div>';document.getElementById('addStudent').onclick=function(){modal('<h3>\u041D\u043E\u0432\u044B\u0439 \u0443\u0447\u0435\u043D\u0438\u043A</h3><div class="field"><input id="newStudent" placeholder="\u0424\u0430\u043C\u0438\u043B\u0438\u044F \u0418\u043C\u044F"></div><button class="btn" id="saveStudent">\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C</button>');document.getElementById('saveStudent').onclick=async function(){await api('/api/students',{method:'POST',body:JSON.stringify({name:document.getElementById('newStudent').value})});closeModal();toast('\u0414\u043E\u0431\u0430\u0432\u043B\u0435\u043D');go('students')}};document.querySelectorAll('[data-card]').forEach(function(b){b.onclick=async function(){var d=await api('/api/student/'+b.dataset.card);modal('<h3>'+esc(d.student.name)+'</h3><div class="grid">'+metric('\u041F\u043E\u0441\u0435\u0449\u0430\u0435\u043C\u043E\u0441\u0442\u044C',d.attendance_percent+'%')+metric('\u274C \u041F\u0440\u043E\u043F\u0443\u0441\u043A\u0438',d.absent)+metric('\u{1F912} \u0411\u043E\u043B\u0435\u0435\u0442',d.sick)+metric('\u{1F4DD} \u0417\u0430\u044F\u0432\u043B\u0435\u043D\u0438\u044F',d.application)+'</div><h3>\u041F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 \u0441\u043E\u0431\u044B\u0442\u0438\u044F</h3><div class="list">'+d.events.map(function(e){var sm=statusMeta[e.status]||['',''];var label=e.summary_label||((sm[0]+' '+sm[1]).trim());return '<div class="list-item"><b>'+esc(e.date)+'</b><div class="small muted">'+esc(label)+'</div></div>'}).join('')+'</div>')}})}
 pages.calendar=async function(c){var d=await api('/api/calendar?month='+state.month);var first=new Date(state.month+'-01T12:00:00'),start=(first.getDay()+6)%7,days=new Date(first.getFullYear(),first.getMonth()+1,0).getDate(),cells='';for(var i=0;i<start;i++)cells+='<div></div>';for(var x=1;x<=days;x++){var ds=state.month+'-'+String(x).padStart(2,'0'),q=d.days[ds]||{};cells+='<div class="day"><strong>'+x+'</strong><div>\u274C '+(q.absent||0)+'</div><div>\u{1F912} '+(q.sick||0)+' \xB7 \u{1F4DD} '+(q.application||0)+'</div><div>\u2194\uFE0F '+(q.partial||0)+' \u0447\u0430\u0441\u0442\u0438\u0447\u043D\u043E</div></div>'}c.innerHTML='<div class="section-head"><h2>\u{1F4C5} \u041A\u0430\u043B\u0435\u043D\u0434\u0430\u0440\u044C</h2><div class="actions"><input type="month" id="calMonth" value="'+state.month+'"></div></div><div class="calendar">'+cells+'</div>';document.getElementById('calMonth').onchange=function(){state.month=this.value;go('calendar')}}
@@ -26782,6 +26801,36 @@ async function handleWebApi(request, env, url) {
                 ON CONFLICT(weekday,lesson_no) DO UPDATE SET subject=excluded.subject,time=excluded.time,teacher=excluded.teacher,room=excluded.room`).bind(Number(body.weekday), Number(body.lesson_no), String(body.subject || ""), String(body.time || ""), String(body.teacher || ""), String(body.room || "")).run();
       await webAudit(env, user, "schedule_set", `day=${body.weekday} lesson=${body.lesson_no}`);
       return jsonResponse({ ok: true });
+    }
+    if (path === "/api/lineup" && request.method === "GET") {
+      await requireWeb(request,env,"view_journal");
+      const date=String(url.searchParams.get("date")||""),dt=new Date(date+"T12:00:00Z");
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||dt.getUTCDay()!==1)return jsonResponse({error:"Линейка только по понедельникам"},400);
+      const rr=(await env.DB.prepare(`SELECT student_id,status FROM lineup_attendance WHERE date=?`).bind(date).all()).results||[];
+      const statuses={};for(const r of rr)statuses[String(r.student_id)]=r.status;
+      return jsonResponse({date,statuses});
+    }
+    if (path === "/api/lineup" && request.method === "POST") {
+      const actor=await requireWeb(request,env,"edit_students");
+      const date=String(body.date||""),studentId=Number(body.student_id),status=String(body.status||"present"),dt=new Date(date+"T12:00:00Z");
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||dt.getUTCDay()!==1)return jsonResponse({error:"Линейка только по понедельникам"},400);
+      if(!["present","absent","sick","application"].includes(status))return jsonResponse({error:"Неверный статус"},400);
+      if(status==="present")await env.DB.prepare(`DELETE FROM lineup_attendance WHERE date=? AND student_id=?`).bind(date,studentId).run();
+      else await env.DB.prepare(`INSERT INTO lineup_attendance(date,student_id,status,updated_at) VALUES(?,?,?,?)
+        ON CONFLICT(date,student_id) DO UPDATE SET status=excluded.status,updated_at=excluded.updated_at`).bind(date,studentId,status,new Date().toISOString()).run();
+      await webAudit(env,actor,"lineup_status",date+" / "+studentId+" / "+status);
+      return jsonResponse({ok:true});
+    }
+    if (path === "/api/lineup/summary" && request.method === "GET") {
+      await requireWeb(request,env,"view_journal");
+      const dates=(await env.DB.prepare(`SELECT DISTINCT date FROM lineup_attendance ORDER BY date`).all()).results||[];
+      const rows=(await env.DB.prepare(`SELECT s.id,s.name,
+        SUM(CASE WHEN l.status='absent' THEN 1 ELSE 0 END) absent,
+        SUM(CASE WHEN l.status='sick' THEN 1 ELSE 0 END) sick,
+        SUM(CASE WHEN l.status='application' THEN 1 ELSE 0 END) application
+        FROM students s LEFT JOIN lineup_attendance l ON l.student_id=s.id
+        WHERE s.active=1 GROUP BY s.id,s.name ORDER BY s.name COLLATE NOCASE`).all()).results||[];
+      return jsonResponse({rows,recordedMondays:dates.length});
     }
     if (path === "/api/meals/calendar" && request.method === "GET") {
       await requireWeb(request, env, "view_journal");
