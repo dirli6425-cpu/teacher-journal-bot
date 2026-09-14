@@ -26095,7 +26095,108 @@ document.querySelectorAll('[data-toggle]').forEach(function(b){
  };
 });
 }
-pages.audit=async function(c){var d=await api('/api/audit');c.innerHTML='<div class="section-head"><h2>\u{1F6E1} \u0416\u0443\u0440\u043D\u0430\u043B \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0439</h2></div><div class="table-wrap"><table class="table"><thead><tr><th>\u0412\u0440\u0435\u043C\u044F</th><th>\u041A\u0442\u043E</th><th>\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u0435</th><th>\u0414\u0435\u0442\u0430\u043B\u0438</th></tr></thead><tbody>'+d.rows.map(function(x){return '<tr><td>'+esc(x.created_at)+'</td><td>'+esc(x.actor_user_id||'system')+'</td><td>'+esc(x.action)+'</td><td>'+esc(x.details||'')+'</td></tr>'}).join('')+'</tbody></table></div>'}
+pages.audit=async function(c){
+  var d=await api('/api/audit'),rows=d.rows||[];
+
+  var A={
+    web_login:['🔐','Вход в систему','Вход'],
+    attendance_set:['👥','Изменена посещаемость','Посещаемость'],
+    attendance_all_present:['✅','Все отмечены присутствующими','Посещаемость'],
+    pair_attendance_set:['📚','Изменена отметка на паре','Пары'],
+    student_add:['➕','Добавлен студент','Студенты'],
+    student_update:['✏️','Изменены данные студента','Студенты'],
+    student_delete:['🗑️','Удалён студент','Студенты'],
+    duty_set:['🧹','Изменено дежурство','Дежурство'],
+    schedule_set:['🗓️','Изменено расписание','Расписание'],
+    account_create:['👤','Создан пользователь','Пользователи'],
+    account_update:['✏️','Изменён пользователь','Пользователи'],
+    account_delete:['🗑️','Удалён пользователь','Пользователи'],
+    account_password:['🔑','Изменён пароль','Пользователи'],
+    settings_update:['⚙️','Изменены настройки','Настройки'],
+    meal_save:['🍽️','Изменено питание','Питание'],
+    meal_delete:['🗑️','Удалена запись питания','Питание'],
+    meal_day_toggle:['🍽️','Изменено питание за день','Питание'],
+    meal_day_all:['🍽️','Изменено питание группы','Питание'],
+    lineup_status:['📢','Изменена отметка на линейке','Линейка']
+  };
+
+  function info(x){return A[x.action]||['🛡️','Действие в системе','Система']}
+  function actor(x){
+    var v=String(x.actor_user_id||'Система');
+    return (v==='null'||v==='undefined'||v==='system')?'Система':v;
+  }
+  function ru(v){
+    return String(v||'')
+      .replace(/\bpresent\b/gi,'присутствует')
+      .replace(/\babsent\b/gi,'отсутствует')
+      .replace(/\bsick\b/gi,'болеет')
+      .replace(/\bapplication\b/gi,'по заявлению')
+      .replace(/\blate\b/gi,'опоздал')
+      .replace(/\bleft\b/gi,'ушёл раньше')
+      .replace(/\bpassword\b/gi,'логин и пароль')
+      .replace(/\btelegram_webapp\b/gi,'Telegram')
+      .replace(/\s*\/\s*/g,' · ');
+  }
+  function when(v){
+    var z=new Date(v);
+    if(isNaN(z))return {date:String(v||''),time:''};
+    return {
+      date:z.toLocaleDateString('ru-RU',{day:'2-digit',month:'long',year:'numeric'}),
+      time:z.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit',second:'2-digit'})
+    };
+  }
+
+  function draw(list){
+    var root=document.getElementById('auditRows'),groups={};
+    if(!list.length){
+      root.innerHTML='<div class="audit-empty">🔎<b>Ничего не найдено</b><span>Попробуйте изменить фильтр</span></div>';
+      return;
+    }
+    list.forEach(function(x){var k=when(x.created_at).date;(groups[k]||(groups[k]=[])).push(x)});
+    root.innerHTML=Object.keys(groups).map(function(day){
+      return '<section class="audit-day"><div class="audit-date"><b>📅 '+esc(day)+'</b><span>'+groups[day].length+' событий</span></div>'+
+      groups[day].map(function(x){
+        var m=info(x),t=when(x.created_at),who=actor(x),det=ru(x.details)||'Без дополнительных сведений';
+        return '<article class="audit-event">'+
+          '<div class="audit-emoji">'+m[0]+'</div>'+
+          '<div class="audit-body"><div class="audit-title"><b>'+esc(m[1])+'</b><time>🕒 '+esc(t.time)+'</time></div>'+
+          '<div class="audit-details">'+esc(det)+'</div>'+
+          '<div class="audit-foot"><span class="audit-person">👤 '+esc(who)+'</span><span class="audit-tag">'+esc(m[2])+'</span></div></div>'+
+        '</article>';
+      }).join('')+'</section>';
+    }).join('');
+  }
+
+  var cats=[];
+  rows.forEach(function(x){var c=info(x)[2];if(cats.indexOf(c)<0)cats.push(c)});
+  cats.sort();
+
+  c.innerHTML='<style>'+
+    '.audit-head{padding:18px;border:1px solid var(--line);border-radius:20px;background:linear-gradient(135deg,var(--panel),var(--panel2));box-shadow:0 10px 35px rgba(0,0,0,.08)}'+
+    '.audit-head h2{margin:0 0 4px;font-size:25px}.audit-tools{display:grid;grid-template-columns:2fr 1fr;gap:9px;margin-top:15px}'+
+    '.audit-date{display:flex;justify-content:space-between;align-items:center;margin:18px 4px 8px}.audit-date span{font-size:11px;color:var(--muted)}'+
+    '.audit-event{display:flex;gap:12px;padding:14px;margin-bottom:8px;border:1px solid var(--line);border-radius:17px;background:var(--panel);box-shadow:0 5px 20px rgba(0,0,0,.07)}'+
+    '.audit-event:hover{border-color:var(--accent)}.audit-emoji{display:flex;align-items:center;justify-content:center;width:44px;height:44px;min-width:44px;border-radius:14px;background:var(--panel2);font-size:22px}'+
+    '.audit-body{flex:1;min-width:0}.audit-title{display:flex;justify-content:space-between;gap:12px}.audit-title time{white-space:nowrap;font-size:11px;color:var(--muted)}'+
+    '.audit-details{margin-top:5px;font-size:13px;line-height:1.45;color:var(--muted);word-break:break-word}.audit-foot{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:9px;font-size:12px;font-weight:650}'+
+    '.audit-tag{padding:4px 8px;border-radius:999px;background:var(--panel2);color:var(--muted);font-size:10px}.audit-empty{display:flex;flex-direction:column;align-items:center;gap:7px;padding:35px;margin-top:15px;border:1px solid var(--line);border-radius:18px;background:var(--panel);font-size:28px}.audit-empty b{font-size:15px}.audit-empty span{font-size:12px;color:var(--muted)}'+
+    '@media(max-width:650px){.audit-tools{grid-template-columns:1fr}.audit-head{padding:15px}.audit-event{padding:12px}.audit-title{align-items:flex-start}.audit-title time{font-size:10px}.audit-details{font-size:12px}.audit-emoji{width:40px;height:40px;min-width:40px}}'+
+  '</style>'+
+  '<div class="audit-head"><div class="section-head" style="margin:0"><div><h2>🛡️ Журнал действий</h2><div class="muted">Кто, что и во сколько делал в системе</div></div><div class="pill">'+rows.length+' событий</div></div>'+
+  '<div class="audit-tools"><input id="auditQ" placeholder="🔎 Найти действие, человека или детали"><select id="auditCat"><option value="">Все разделы</option>'+cats.map(function(x){return '<option>'+esc(x)+'</option>'}).join('')+'</select></div></div>'+
+  '<div id="auditRows"></div>';
+
+  function filter(){
+    var q=(document.getElementById('auditQ').value||'').trim().toLowerCase(),cat=document.getElementById('auditCat').value;
+    draw(rows.filter(function(x){
+      var m=info(x),hay=(m[1]+' '+m[2]+' '+actor(x)+' '+ru(x.details)).toLowerCase();
+      return (!q||hay.indexOf(q)>=0)&&(!cat||m[2]===cat);
+    }));
+  }
+  document.getElementById('auditQ').oninput=filter;
+  document.getElementById('auditCat').onchange=filter;
+  draw(rows);
+}
 pages.settings=async function(c){var d=await api('/api/settings');c.innerHTML='<div class="section-head"><h2>\u2699\uFE0F \u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438</h2></div><div class="card"><div class="field"><label>\u041D\u0430\u0437\u0432\u0430\u043D\u0438\u0435 \u0433\u0440\u0443\u043F\u043F\u044B</label><input id="groupName" value="'+esc(d.group_name||'\u0413\u0440\u0443\u043F\u043F\u0430 102')+'"></div><div class="field"><label>\u0427\u0430\u0441\u043E\u0432\u043E\u0439 \u043F\u043E\u044F\u0441</label><input id="tz" value="'+esc(d.timezone||'Europe/Chisinau')+'"></div><button class="btn" id="saveSettings">\u0421\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C</button></div>';document.getElementById('saveSettings').onclick=async function(){await api('/api/settings',{method:'POST',body:JSON.stringify({group_name:document.getElementById('groupName').value,timezone:document.getElementById('tz').value})});toast('\u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u0441\u043E\u0445\u0440\u0430\u043D\u0435\u043D\u044B')}}
 document.getElementById('logout').onclick=async function(){
   await api('/api/logout',{method:'POST',body:'{}'});
