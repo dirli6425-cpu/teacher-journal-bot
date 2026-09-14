@@ -25823,18 +25823,172 @@ pages.dashboard=async function(c){var d=await api('/api/dashboard');c.innerHTML=
 pages.journal=async function(c){await loadStudents();var d=await api('/api/attendance?date='+state.date);var rows=state.students.map(function(s){var st=d.statuses[String(s.id)]||'none';return '<tr><td><div class="student"><div class="avatar">'+esc(s.name[0])+'</div><b>'+esc(s.name)+'</b></div></td><td>'+statusButton(st,s.id,'day',state.date)+'</td></tr>'}).join('');c.innerHTML='<div class="section-head"><h2>\u{1F465} \u041F\u043E\u0441\u0435\u0449\u0430\u0435\u043C\u043E\u0441\u0442\u044C</h2><div class="actions"><input type="date" id="journalDate" value="'+state.date+'"><button class="btn secondary" id="allPresent">\u2705 \u0412\u0441\u0435 \u0435\u0441\u0442\u044C</button></div></div><div class="table-wrap"><table class="table"><thead><tr><th>\u0423\u0447\u0435\u043D\u0438\u043A</th><th>\u0421\u0442\u0430\u0442\u0443\u0441</th></tr></thead><tbody>'+rows+'</tbody></table></div>';document.getElementById('journalDate').onchange=function(){state.date=this.value;go('journal')};document.getElementById('allPresent').onclick=async function(){await api('/api/attendance/all-present',{method:'POST',body:JSON.stringify({date:state.date})});toast('\u0412\u0441\u0435 \u043E\u0442\u043C\u0435\u0447\u0435\u043D\u044B');go('journal')};bindStatusButtons()}
 pages.lineup=async function(c){
   await loadStudents();
-  function mondayOf(v){var d=new Date(v+'T12:00:00');var n=d.getDay();d.setDate(d.getDate()-((n+6)%7));return d.toISOString().slice(0,10)}
-  var date=mondayOf(state.date),d=await api('/api/lineup?date='+date),st=d.statuses||{};
-  function meta(x){return x==='absent'?['❌','Не был']:x==='sick'?['🤒','Болеет']:x==='application'?['📝','По заявлению']:['✅','Был']}
-  var counts={present:0,absent:0,sick:0,application:0};
-  state.students.forEach(function(x){counts[st[String(x.id)]||'present']++});
-  var rows=state.students.map(function(x){var v=st[String(x.id)]||'present',m=meta(v);return '<button class="list-item lineupStudent" data-id="'+x.id+'" data-status="'+v+'" style="width:100%;text-align:left;color:inherit;cursor:pointer"><span style="font-size:23px">'+m[0]+'</span><div style="flex:1"><b>'+esc(x.name)+'</b><div class="small muted">'+m[1]+'</div></div></button>'}).join('');
-  c.innerHTML='<div class="section-head"><div><h2>📢 Линейка</h2><div class="muted">По умолчанию все присутствуют — отмечайте только исключения</div></div><div class="actions"><input type="date" id="lineupDate" value="'+date+'"><button class="btn secondary" id="lineupSummary">📊 Сводка</button></div></div>'+
-  '<div class="grid" style="margin-bottom:14px">'+metric('✅ Были',counts.present)+metric('❌ Не были',counts.absent)+metric('🤒 Болели',counts.sick)+metric('📝 Заявление',counts.application)+'</div>'+
-  '<div class="card"><div class="small muted" style="margin-bottom:10px">Нажимайте только на отсутствующих. Статус: Был → Не был → Болел → По заявлению → Был.</div><div class="list">'+rows+'</div></div>';
-  document.getElementById('lineupDate').onchange=function(){var md=mondayOf(this.value);state.date=md;go('lineup')};
-  document.querySelectorAll('.lineupStudent').forEach(function(b){b.onclick=async function(){var order=['present','absent','sick','application'],i=order.indexOf(b.dataset.status),next=order[(i+1)%order.length];await api('/api/lineup',{method:'POST',body:JSON.stringify({date:date,student_id:Number(b.dataset.id),status:next})});go('lineup')}});
-  document.getElementById('lineupSummary').onclick=async function(){var q=await api('/api/lineup/summary'),n=Number(q.recordedMondays||0);modal('<h3>📊 Сводка по линейкам</h3><div class="small muted" style="margin-bottom:12px">Отмеченных понедельников: '+n+'</div><div class="list">'+q.rows.map(function(x){var a=Number(x.absent||0),si=Number(x.sick||0),ap=Number(x.application||0),bad=a+si+ap,p=Math.max(0,n-bad);return '<div class="list-item"><div style="flex:1"><b>'+esc(x.name)+'</b><div class="small muted">✅ '+p+' · ❌ '+a+' · 🤒 '+si+' · 📝 '+ap+'</div></div></div>'}).join('')+'</div>')};
+
+  function mondayOf(v){
+    var d=new Date(v+'T12:00:00');
+    var n=d.getDay();
+    d.setDate(d.getDate()-((n+6)%7));
+    return d.toISOString().slice(0,10);
+  }
+  function ymLabel(ym){
+    var m=['','Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+    var p=ym.split('-'); return m[Number(p[1])]+' '+p[0];
+  }
+  function meta(x){
+    return x==='absent'?['❌','Не был']:
+           x==='sick'?['🤒','Болеет']:
+           x==='application'?['📝','По заявлению']:
+           ['✅','Был'];
+  }
+
+  var selectedDate=mondayOf(state.date);
+  var month=selectedDate.slice(0,7);
+
+  c.innerHTML=
+    '<div class="section-head"><div><h2>📢 Линейка</h2><div class="muted">Только понедельники · по умолчанию все присутствуют</div></div>'+
+      '<div class="actions"><button class="btn secondary" id="lineupMonthSummary">📊 Сводка за месяц</button></div></div>'+
+    '<div id="lineupCalendar"></div>'+
+    '<div id="lineupDay" style="margin-top:14px"></div>';
+
+  async function renderCalendar(){
+    var d=await api('/api/lineup/calendar?month='+month);
+    var map={};
+    (d.days||[]).forEach(function(x){map[x.date]=x;});
+
+    var parts=month.split('-'),y=Number(parts[0]),m=Number(parts[1]);
+    var first=new Date(y,m-1,1),days=new Date(y,m,0).getDate();
+    var offset=(first.getDay()+6)%7;
+    var cells=[];
+    for(var i=0;i<offset;i++) cells.push('<div></div>');
+
+    for(var day=1;day<=days;day++){
+      var dt=new Date(y,m-1,day,12),dow=dt.getDay();
+      var ds=y+'-'+String(m).padStart(2,'0')+'-'+String(day).padStart(2,'0');
+      var isMon=dow===1,on=ds===selectedDate,stat=map[ds]||{};
+      var bad=Number(stat.absent||0)+Number(stat.sick||0)+Number(stat.application||0);
+      cells.push(
+        '<button '+(!isMon?'disabled':'')+' class="lineup-day '+(on?'lineup-on ':'')+(!isMon?'lineup-disabled':'')+'" data-date="'+ds+'">'+
+          '<b>'+day+'</b>'+
+          (isMon?'<span>'+(bad?bad+' исключ.':'Все были')+'</span>':'')+
+        '</button>'
+      );
+    }
+
+    document.getElementById('lineupCalendar').innerHTML=
+      '<div class="card">'+
+        '<div class="section-head"><div><h2 style="margin:0">'+ymLabel(month)+'</h2><div class="small muted">Нажмите на понедельник</div></div>'+
+          '<div class="actions"><button class="btn ghost" id="lineupPrevMonth">◀</button><button class="btn ghost" id="lineupNextMonth">▶</button></div></div>'+
+        '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:7px;margin-bottom:7px">'+
+          ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(function(x){return '<div class="small muted" style="text-align:center;font-weight:700">'+x+'</div>'}).join('')+
+        '</div>'+
+        '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:7px">'+cells.join('')+'</div>'+
+      '</div>'+
+      '<style>'+
+      '.lineup-day{min-height:70px;border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:12px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px}.lineup-day b{font-size:18px}.lineup-day span{font-size:11px;color:var(--muted)}.lineup-day:hover{border-color:var(--accent)}.lineup-on{outline:2px solid var(--accent);background:rgba(122,162,255,.12)}.lineup-disabled{opacity:.22;cursor:not-allowed}@media(max-width:600px){.lineup-day{min-height:54px}.lineup-day b{font-size:15px}.lineup-day span{font-size:9px}}'+
+      '</style>';
+
+    document.querySelectorAll('.lineup-day:not([disabled])').forEach(function(b){
+      b.onclick=function(){
+        selectedDate=b.dataset.date;
+        state.date=selectedDate;
+        renderCalendar();
+        renderDay();
+      };
+    });
+
+    document.getElementById('lineupPrevMonth').onclick=function(){
+      var p=month.split('-').map(Number),d=new Date(p[0],p[1]-2,1,12);
+      month=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+      selectedDate=mondayOf(month+'-07');
+      state.date=selectedDate;
+      renderCalendar();renderDay();
+    };
+    document.getElementById('lineupNextMonth').onclick=function(){
+      var p=month.split('-').map(Number),d=new Date(p[0],p[1],1,12);
+      month=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+      selectedDate=mondayOf(month+'-07');
+      state.date=selectedDate;
+      renderCalendar();renderDay();
+    };
+  }
+
+  async function renderDay(){
+    var d=await api('/api/lineup?date='+selectedDate),st=d.statuses||{};
+    var counts={present:0,absent:0,sick:0,application:0};
+    state.students.forEach(function(x){counts[st[String(x.id)]||'present']++});
+
+    var rows=state.students.map(function(x){
+      var v=st[String(x.id)]||'present',m=meta(v);
+      return '<button class="list-item lineupStudent" data-id="'+x.id+'" data-status="'+v+'" style="width:100%;text-align:left;color:inherit;cursor:pointer">'+
+        '<span style="font-size:23px">'+m[0]+'</span>'+
+        '<div style="flex:1"><b>'+esc(x.name)+'</b><div class="small muted">'+m[1]+'</div></div>'+
+      '</button>';
+    }).join('');
+
+    document.getElementById('lineupDay').innerHTML=
+      '<div class="grid" style="margin-bottom:14px">'+
+        metric('✅ Были',counts.present)+
+        metric('❌ Не были',counts.absent)+
+        metric('🤒 Болели',counts.sick)+
+        metric('📝 Заявление',counts.application)+
+      '</div>'+
+      '<div class="card">'+
+        '<div class="section-head"><div><h2 style="margin:0">📅 '+fmtDate(selectedDate)+'</h2><div class="small muted">Отмечайте только исключения</div></div>'+
+          '<button class="btn secondary" id="lineupDaySummary">📋 Сводка за '+fmtDate(selectedDate)+'</button></div>'+
+        '<div class="small muted" style="margin-bottom:10px">Статус: Был → Не был → Болел → По заявлению → Был</div>'+
+        '<div class="list">'+rows+'</div>'+
+      '</div>';
+
+    document.querySelectorAll('.lineupStudent').forEach(function(b){
+      b.onclick=async function(){
+        var order=['present','absent','sick','application'];
+        var i=order.indexOf(b.dataset.status),next=order[(i+1)%order.length];
+        await api('/api/lineup',{method:'POST',body:JSON.stringify({date:selectedDate,student_id:Number(b.dataset.id),status:next})});
+        renderDay();renderCalendar();
+      };
+    });
+
+    document.getElementById('lineupDaySummary').onclick=function(){
+      var exc=state.students.map(function(x){
+        var v=st[String(x.id)]||'present',m=meta(v);
+        return {name:x.name,status:v,icon:m[0],label:m[1]};
+      }).filter(function(x){return x.status!=='present';});
+
+      modal('<h3>📋 '+fmtDate(selectedDate)+'</h3>'+
+        '<div class="grid">'+
+          metric('✅ Были',counts.present)+metric('❌ Не были',counts.absent)+metric('🤒 Болели',counts.sick)+metric('📝 Заявление',counts.application)+
+        '</div>'+
+        '<h3 style="margin-top:16px">Исключения</h3>'+
+        (exc.length?'<div class="list">'+exc.map(function(x){return '<div class="list-item"><span style="font-size:22px">'+x.icon+'</span><div><b>'+esc(x.name)+'</b><div class="small muted">'+x.label+'</div></div></div>'}).join('')+'</div>':'<div class="card">✅ Все были на линейке</div>')
+      );
+    };
+  }
+
+  document.getElementById('lineupMonthSummary').onclick=async function(){
+    var q=await api('/api/lineup/month?month='+month);
+    var mondays=q.mondays||[],rows=q.rows||[];
+    var totalPresent=rows.reduce(function(a,x){return a+Number(x.present||0)},0);
+    var totalAbsent=rows.reduce(function(a,x){return a+Number(x.absent||0)},0);
+    var totalSick=rows.reduce(function(a,x){return a+Number(x.sick||0)},0);
+    var totalApp=rows.reduce(function(a,x){return a+Number(x.application||0)},0);
+
+    modal(
+      '<h3>📊 Линейки — '+ymLabel(month)+'</h3>'+
+      '<div class="small muted" style="margin-bottom:12px">Понедельников в месяце: '+mondays.length+'</div>'+
+      '<div class="grid">'+
+        metric('✅ Были',totalPresent)+metric('❌ Не были',totalAbsent)+metric('🤒 Болели',totalSick)+metric('📝 Заявление',totalApp)+
+      '</div>'+
+      '<div class="card" style="margin-top:14px"><div class="table-wrap"><table class="table"><thead><tr><th>Ученик</th><th>✅</th><th>❌</th><th>🤒</th><th>📝</th><th>%</th></tr></thead><tbody>'+
+        rows.map(function(x){
+          var total=Number(x.total||0),present=Number(x.present||0),pct=total?Math.round(present/total*100):0;
+          return '<tr><td><b>'+esc(x.name)+'</b></td><td>'+present+'</td><td>'+Number(x.absent||0)+'</td><td>'+Number(x.sick||0)+'</td><td>'+Number(x.application||0)+'</td><td>'+pct+'%</td></tr>';
+        }).join('')+
+      '</tbody></table></div></div>'
+    );
+  };
+
+  await renderCalendar();
+  await renderDay();
 }
 pages.pairs=async function(c){await loadStudents();var d=await api('/api/pairs?date='+state.date);var lessons=d.lessons||4;var head='<th>\u0423\u0447\u0435\u043D\u0438\u043A</th>';for(var l=1;l<=lessons;l++)head+='<th>'+l+' \u043F\u0430\u0440\u0430</th>';var rows=state.students.map(function(s){var t='<tr><td><b>'+esc(s.name)+'</b></td>';for(var l=1;l<=lessons;l++){var st=(d.statuses[String(l)]||{})[String(s.id)]||'none';t+='<td>'+statusButton(st,s.id,'pair',state.date,l)+'</td>'}return t+'</tr>'}).join('');c.innerHTML='<div class="section-head"><h2>\u{1F4DA} \u041F\u043E \u043F\u0430\u0440\u0430\u043C</h2><div class="actions"><input type="date" id="pairDate" value="'+state.date+'"></div></div><div class="table-wrap"><table class="table"><thead><tr>'+head+'</tr></thead><tbody>'+rows+'</tbody></table></div>';document.getElementById('pairDate').onchange=function(){state.date=this.value;go('pairs')};bindStatusButtons()}
 pages.students=async function(c){await loadStudents();c.innerHTML='<div class="section-head"><h2>\u{1F464} \u0421\u0442\u0443\u0434\u0435\u043D\u0442\u044B</h2><div class="actions"><button class="btn" id="addStudent">+ \u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C</button></div></div><div class="list">'+state.students.map(function(s){return '<div class="list-item"><div class="avatar">'+esc(s.name[0])+'</div><div style="flex:1"><b>'+esc(s.name)+'</b></div><button class="btn secondary" data-card="'+s.id+'">\u041A\u0430\u0440\u0442\u043E\u0447\u043A\u0430</button></div>'}).join('')+'</div>';document.getElementById('addStudent').onclick=function(){modal('<h3>\u041D\u043E\u0432\u044B\u0439 \u0443\u0447\u0435\u043D\u0438\u043A</h3><div class="field"><input id="newStudent" placeholder="\u0424\u0430\u043C\u0438\u043B\u0438\u044F \u0418\u043C\u044F"></div><button class="btn" id="saveStudent">\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C</button>');document.getElementById('saveStudent').onclick=async function(){await api('/api/students',{method:'POST',body:JSON.stringify({name:document.getElementById('newStudent').value})});closeModal();toast('\u0414\u043E\u0431\u0430\u0432\u043B\u0435\u043D');go('students')}};document.querySelectorAll('[data-card]').forEach(function(b){b.onclick=async function(){var d=await api('/api/student/'+b.dataset.card);modal('<h3>'+esc(d.student.name)+'</h3><div class="grid">'+metric('\u041F\u043E\u0441\u0435\u0449\u0430\u0435\u043C\u043E\u0441\u0442\u044C',d.attendance_percent+'%')+metric('\u274C \u041F\u0440\u043E\u043F\u0443\u0441\u043A\u0438',d.absent)+metric('\u{1F912} \u0411\u043E\u043B\u0435\u0435\u0442',d.sick)+metric('\u{1F4DD} \u0417\u0430\u044F\u0432\u043B\u0435\u043D\u0438\u044F',d.application)+'</div><h3>\u041F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 \u0441\u043E\u0431\u044B\u0442\u0438\u044F</h3><div class="list">'+d.events.map(function(e){var sm=statusMeta[e.status]||['',''];var label=e.summary_label||((sm[0]+' '+sm[1]).trim());return '<div class="list-item"><b>'+esc(e.date)+'</b><div class="small muted">'+esc(label)+'</div></div>'}).join('')+'</div>')}})}
@@ -26821,6 +26975,62 @@ async function handleWebApi(request, env, url) {
       await webAudit(env,actor,"lineup_status",date+" / "+studentId+" / "+status);
       return jsonResponse({ok:true});
     }
+    if (path === "/api/lineup/calendar" && request.method === "GET") {
+      await requireWeb(request,env,"view_journal");
+      const month=String(url.searchParams.get("month")||localDate().slice(0,7));
+      if(!/^\d{4}-\d{2}$/.test(month)) return jsonResponse({error:"Неверный месяц"},400);
+      const rows=(await env.DB.prepare(`
+        SELECT date,
+          SUM(CASE WHEN status='absent' THEN 1 ELSE 0 END) absent,
+          SUM(CASE WHEN status='sick' THEN 1 ELSE 0 END) sick,
+          SUM(CASE WHEN status='application' THEN 1 ELSE 0 END) application
+        FROM lineup_attendance
+        WHERE substr(date,1,7)=?
+        GROUP BY date
+        ORDER BY date
+      `).bind(month).all()).results||[];
+      return jsonResponse({month,days:rows});
+    }
+
+    if (path === "/api/lineup/month" && request.method === "GET") {
+      await requireWeb(request,env,"view_journal");
+      const month=String(url.searchParams.get("month")||localDate().slice(0,7));
+      if(!/^\d{4}-\d{2}$/.test(month)) return jsonResponse({error:"Неверный месяц"},400);
+
+      const students=(await env.DB.prepare(`SELECT id,name FROM students WHERE active=1 ORDER BY name COLLATE NOCASE`).all()).results||[];
+      const rows=(await env.DB.prepare(`
+        SELECT date,student_id,status
+        FROM lineup_attendance
+        WHERE substr(date,1,7)=?
+        ORDER BY date,student_id
+      `).bind(month).all()).results||[];
+
+      const mondays=[];
+      const [yy,mm]=month.split("-").map(Number);
+      const last=new Date(Date.UTC(yy,mm,0)).getUTCDate();
+      for(let d=1;d<=last;d++){
+        const dt=new Date(Date.UTC(yy,mm-1,d,12));
+        if(dt.getUTCDay()===1) mondays.push(`${yy}-${String(mm).padStart(2,"0")}-${String(d).padStart(2,"0")}`);
+      }
+
+      const map={};
+      for(const r of rows) map[`${r.date}:${r.student_id}`]=r.status;
+
+      const summary=students.map(st=>{
+        let present=0,absent=0,sick=0,application=0;
+        for(const date of mondays){
+          const status=map[`${date}:${st.id}`]||"present";
+          if(status==="absent") absent++;
+          else if(status==="sick") sick++;
+          else if(status==="application") application++;
+          else present++;
+        }
+        return {id:st.id,name:st.name,present,absent,sick,application,total:mondays.length};
+      });
+
+      return jsonResponse({month,mondays,rows:summary});
+    }
+
     if (path === "/api/lineup/summary" && request.method === "GET") {
       await requireWeb(request,env,"view_journal");
       const dates=(await env.DB.prepare(`SELECT DISTINCT date FROM lineup_attendance ORDER BY date`).all()).results||[];
