@@ -26591,6 +26591,21 @@ async function initWebDb(env) {
                 (weekday,lesson_no,subject,time,teacher,room) VALUES(?,?,?,?,?,?)`).bind(...r).run();
     }
   }
+
+  // Bell-time migration for already existing databases.
+  // Defaults above affect only an empty schedule table, so update legacy saved times too.
+  await env.DB.prepare(`
+    UPDATE schedule_lessons
+    SET time = CASE
+      WHEN lesson_no = 3 AND time IN ('12:00–13:20','12:00-13:20','12:00 — 13:20','12:00 - 13:20') THEN '12:10–13:30'
+      WHEN lesson_no = 4 AND time IN ('13:30–14:50','13:30-14:50','13:30 — 14:50','13:30 - 14:50') THEN '13:40–15:00'
+      ELSE time
+    END
+    WHERE
+      (lesson_no = 3 AND time IN ('12:00–13:20','12:00-13:20','12:00 — 13:20','12:00 - 13:20'))
+      OR
+      (lesson_no = 4 AND time IN ('13:30–14:50','13:30-14:50','13:30 — 14:50','13:30 - 14:50'))
+  `).run();
 }
 __name(initWebDb, "initWebDb");
 var initDbBeforeWeb = initDb;
