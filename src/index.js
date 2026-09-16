@@ -25944,14 +25944,15 @@ pages.meals=async function(c){
   async function renderDay(){
     var d=await api('/api/meals/day?date='+selectedDate),r=d.rows||[];
     var chosen=r.filter(function(x){return Number(x.selected)===1}).length;
-    var benefits=r.filter(function(x){return Number(x.selected)===1&&Number(x.benefit)===1}).length;
+    var benefits=r.filter(function(x){return Number(x.selected)===1&&Number(x.benefit)===1&&Number(x.orphan)!==1}).length;
     var orphans=r.filter(function(x){return Number(x.selected)===1&&Number(x.orphan)===1}).length;
+    var paid=r.filter(function(x){return Number(x.selected)===1&&Number(x.benefit)!==1&&Number(x.orphan)!==1}).length;
     document.getElementById('mealDay').innerHTML=
       '<div class="card"><div class="section-head"><div><h2 style="margin:0">📅 '+fmtDate(selectedDate)+'</h2><div class="muted">Отмечено '+chosen+' · льгот '+benefits+' · сирот '+orphans+'</div></div>'+
       '<div style="display:flex;gap:7px;flex-wrap:wrap"><button class="btn secondary" id="mealAll">✅ Все</button><button class="btn ghost" id="mealClear">Очистить</button><button class="btn" id="mealDayReport">🖨 Отчёт за день</button></div></div>'+
       '<div class="list">'+(r.length?r.map(function(x){return '<button class="list-item mealToggle" data-id="'+x.student_id+'" data-sel="'+Number(x.selected)+'" style="width:100%;text-align:left;color:inherit;cursor:pointer">'+
         '<span style="font-size:24px">'+(Number(x.selected)?'✅':'▫️')+'</span><div style="flex:1"><b>'+esc(x.name)+'</b><div class="small muted">'+
-        (Number(x.benefit)?'⭐ Льгота':'🥣 Без льготы')+(Number(x.orphan)?' · 🧒 Сирота':'')+(x.note?' · '+esc(x.note):'')+
+        (Number(x.orphan)?'🧒 Сирота':Number(x.benefit)?'⭐ Льготник':'💳 Платник')+(x.note?' · '+esc(x.note):'')+
         '</div></div></button>'}).join(''):'<div class="muted">Сначала добавьте учеников в «Список питания».</div>')+'</div></div>';
 
     document.querySelectorAll('.mealToggle').forEach(function(b){b.onclick=async function(){
@@ -25972,99 +25973,54 @@ pages.meals=async function(c){
   };
 
   function renderProfiles(){
-    var benefits=rows.filter(function(x){return Number(x.benefit)===1}).length;
-    var orphans=rows.filter(function(x){return Number(x.orphan)===1}).length;
+    function categoryOf(x){
+      if(Number(x.orphan)===1)return 'orphan';
+      if(Number(x.benefit)===1)return 'benefit';
+      return 'paid';
+    }
+    function categoryText(x){
+      var c=categoryOf(x);
+      return c==='orphan'?'🧒 Сирота':c==='benefit'?'⭐ Льготник':'💳 Платник';
+    }
+    var paid=rows.filter(function(x){return categoryOf(x)==='paid'}).length;
+    var benefits=rows.filter(function(x){return categoryOf(x)==='benefit'}).length;
+    var orphans=rows.filter(function(x){return categoryOf(x)==='orphan'}).length;
     modal(
       '<h3>⚙️ Список питания</h3>'+
-      '<div class="small muted" style="margin-bottom:10px">Всего '+rows.length+' · льгот '+benefits+' · сирот '+orphans+'</div>'+
+      '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:12px 0 14px">'+
+      '<div style="padding:10px 6px;border-radius:12px;background:rgba(59,130,246,.10);text-align:center"><div style="font-size:20px;font-weight:800">'+paid+'</div><div class="small">💳 Платники</div></div>'+
+      '<div style="padding:10px 6px;border-radius:12px;background:rgba(245,158,11,.12);text-align:center"><div style="font-size:20px;font-weight:800">'+benefits+'</div><div class="small">⭐ Льготники</div></div>'+
+      '<div style="padding:10px 6px;border-radius:12px;background:rgba(16,185,129,.12);text-align:center"><div style="font-size:20px;font-weight:800">'+orphans+'</div><div class="small">🧒 Сироты</div></div></div>'+
+      '<div class="small muted" style="margin-bottom:12px;text-align:center">👥 Всего учеников: <b>'+rows.length+'</b></div>'+
       '<button class="btn" id="mealProfileAdd" style="width:100%;margin-bottom:12px">➕ Добавить ученика</button>'+
-      '<div class="list">'+
-      (rows.length?rows.map(function(x){
-        return '<div class="list-item">'+
-          '<div style="flex:1"><b>'+esc(x.name)+'</b><div class="small muted">'+
-          (Number(x.benefit)?'⭐ Льгота':'🥣 Без льготы')+
-          (Number(x.orphan)?' · 🧒 Сирота':'')+
-          (x.note?' · '+esc(x.note):'')+
-          '</div></div>'+
-          '<button class="btn secondary mealProfileEdit" data-id="'+x.student_id+'">Изменить</button>'+
-          '<button class="btn ghost mealProfileDel" data-id="'+x.student_id+'">Удалить</button>'+
-        '</div>';
-      }).join(''):'<div class="muted">Пока никто не добавлен.</div>')+
-      '</div>'
+      '<div class="list">'+(rows.length?rows.map(function(x){return '<div class="list-item"><div style="flex:1"><b>'+esc(x.name)+'</b><div class="small muted">'+categoryText(x)+(x.note?' · '+esc(x.note):'')+'</div></div><button class="btn secondary mealProfileEdit" data-id="'+x.student_id+'">Изменить</button><button class="btn ghost mealProfileDel" data-id="'+x.student_id+'">Удалить</button></div>';}).join(''):'<div class="muted">Пока никто не добавлен.</div>')+'</div>'
     );
-
     document.getElementById('mealProfileAdd').onclick=function(){
       if(!available.length){toast('Все активные студенты уже добавлены');return;}
-      modal(
-        '<h3>➕ Добавить в питание</h3>'+
-        '<div class="field"><label>Студент</label><select id="mealStudent">'+
-        available.map(function(x){return '<option value="'+x.id+'">'+esc(x.name)+'</option>';}).join('')+
-        '</select></div>'+
-        '<div class="field"><label>Категория питания</label><select id="mealBenefit">'+
-        '<option value="0">🥣 Без льготы</option><option value="1">⭐ Льгота</option>'+
-        '</select></div>'+
-        '<div class="field"><label>Сирота</label><select id="mealOrphan">'+
-        '<option value="0">Нет</option><option value="1">🧒 Да</option>'+
-        '</select></div>'+
-        '<div class="field"><label>Примечание</label><input id="mealNote" maxlength="300" placeholder="Необязательно"></div>'+
-        '<button class="btn" id="mealProfileSave" style="width:100%">Добавить</button>'
-      );
+      modal('<h3>➕ Добавить в питание</h3><div class="field"><label>Студент</label><select id="mealStudent">'+available.map(function(x){return '<option value="'+x.id+'">'+esc(x.name)+'</option>';}).join('')+'</select></div>'+
+      '<div class="field"><label>Категория питания</label><select id="mealCategory"><option value="paid">💳 Платник</option><option value="benefit">⭐ Льготник</option><option value="orphan">🧒 Сирота</option></select></div>'+
+      '<div class="field"><label>Примечание</label><input id="mealNote" maxlength="300" placeholder="Необязательно"></div><button class="btn" id="mealProfileSave" style="width:100%">Добавить</button>');
       document.getElementById('mealProfileSave').onclick=async function(){
-        await api('/api/meals',{method:'POST',body:JSON.stringify({
-          student_id:Number(document.getElementById('mealStudent').value),
-          benefit:document.getElementById('mealBenefit').value==='1',
-          orphan:document.getElementById('mealOrphan').value==='1',
-          note:document.getElementById('mealNote').value
-        })});
+        await api('/api/meals',{method:'POST',body:JSON.stringify({student_id:Number(document.getElementById('mealStudent').value),category:document.getElementById('mealCategory').value,note:document.getElementById('mealNote').value})});
         closeModal();toast('Студент добавлен');go('meals');
       };
     };
-
-    document.querySelectorAll('.mealProfileEdit').forEach(function(b){
-      b.onclick=function(){
-        var x=rows.find(function(r){return Number(r.student_id)===Number(b.dataset.id);});
-        if(!x)return;
-        modal(
-          '<h3>🍽️ '+esc(x.name)+'</h3>'+
-          '<div class="field"><label>Категория питания</label><select id="mealBenefit">'+
-          '<option value="0" '+(!Number(x.benefit)?'selected':'')+'>🥣 Без льготы</option>'+
-          '<option value="1" '+(Number(x.benefit)?'selected':'')+'>⭐ Льгота</option>'+
-          '</select></div>'+
-          '<div class="field"><label>Сирота</label><select id="mealOrphan">'+
-          '<option value="0" '+(!Number(x.orphan)?'selected':'')+'>Нет</option>'+
-          '<option value="1" '+(Number(x.orphan)?'selected':'')+'>🧒 Да</option>'+
-          '</select></div>'+
-          '<div class="field"><label>Примечание</label><input id="mealNote" maxlength="300" value="'+esc(x.note||'')+'" placeholder="Необязательно"></div>'+
-          '<button class="btn" id="mealProfileSave" style="width:100%">Сохранить</button>'
-        );
-        document.getElementById('mealProfileSave').onclick=async function(){
-          await api('/api/meals',{method:'POST',body:JSON.stringify({
-            student_id:Number(x.student_id),
-            benefit:document.getElementById('mealBenefit').value==='1',
-            orphan:document.getElementById('mealOrphan').value==='1',
-            note:document.getElementById('mealNote').value
-          })});
-          closeModal();toast('Сохранено');go('meals');
-        };
+    document.querySelectorAll('.mealProfileEdit').forEach(function(b){b.onclick=function(){
+      var x=rows.find(function(r){return Number(r.student_id)===Number(b.dataset.id);});if(!x)return;
+      var current=categoryOf(x);
+      modal('<h3>🍽️ '+esc(x.name)+'</h3><div class="field"><label>Категория питания</label><select id="mealCategory">'+
+      '<option value="paid" '+(current==='paid'?'selected':'')+'>💳 Платник</option><option value="benefit" '+(current==='benefit'?'selected':'')+'>⭐ Льготник</option><option value="orphan" '+(current==='orphan'?'selected':'')+'>🧒 Сирота</option></select></div>'+
+      '<div class="field"><label>Примечание</label><input id="mealNote" maxlength="300" value="'+esc(x.note||'')+'" placeholder="Необязательно"></div><button class="btn" id="mealProfileSave" style="width:100%">Сохранить</button>');
+      document.getElementById('mealProfileSave').onclick=async function(){
+        await api('/api/meals',{method:'POST',body:JSON.stringify({student_id:Number(x.student_id),category:document.getElementById('mealCategory').value,note:document.getElementById('mealNote').value})});
+        closeModal();toast('Сохранено');go('meals');
       };
-    });
-
-    document.querySelectorAll('.mealProfileDel').forEach(function(b){
-      b.onclick=function(){
-        var x=rows.find(function(r){return Number(r.student_id)===Number(b.dataset.id);});
-        if(!x)return;
-        modal(
-          '<h3>Удалить из питания?</h3>'+
-          '<p><b>'+esc(x.name)+'</b></p>'+
-          '<p class="muted">Из общего списка студентов он не удалится. Удалится только из раздела питания.</p>'+
-          '<button class="btn danger" id="mealProfileDeleteYes" style="width:100%">Удалить из питания</button>'
-        );
-        document.getElementById('mealProfileDeleteYes').onclick=async function(){
-          await api('/api/meals/delete',{method:'POST',body:JSON.stringify({student_id:Number(x.student_id)})});
-          closeModal();toast('Удалено из питания');go('meals');
-        };
-      };
-    });
+    }});
+    document.querySelectorAll('.mealProfileDel').forEach(function(b){b.onclick=function(){
+      var x=rows.find(function(r){return Number(r.student_id)===Number(b.dataset.id);});if(!x)return;
+      modal('<h3>Удалить из питания?</h3><p><b>'+esc(x.name)+'</b></p><p class="muted">Из общего списка студентов он не удалится. Удалится только из раздела питания.</p><button class="btn danger" id="mealProfileDeleteYes" style="width:100%">Удалить из питания</button>');
+      document.getElementById('mealProfileDeleteYes').onclick=async function(){await api('/api/meals/delete',{method:'POST',body:JSON.stringify({student_id:Number(x.student_id)})});closeModal();toast('Удалено из питания');go('meals');};
+    }});
   }
 
   await renderCalendar();await renderDay();
@@ -27612,13 +27568,18 @@ async function handleWebApi(request, env, url) {
     }
     if (path === "/api/meals" && request.method === "POST") {
       const actor = await requireWeb(request, env, "edit_students");
-      const studentId = Number(body.student_id), benefit = body.benefit ? 1 : 0, orphan = body.orphan ? 1 : 0, note = String(body.note || "").trim().slice(0, 300);
+      const studentId = Number(body.student_id);
+      const category = String(body.category || (body.orphan ? "orphan" : body.benefit ? "benefit" : "paid"));
+      const benefit = category === "benefit" ? 1 : 0;
+      const orphan = category === "orphan" ? 1 : 0;
+      const note = String(body.note || "").trim().slice(0, 300);
       const st = await env.DB.prepare(`SELECT id,name FROM students WHERE id=? AND active=1`).bind(studentId).first();
       if (!st) return jsonResponse({ error: "\u0421\u0442\u0443\u0434\u0435\u043D\u0442 \u043D\u0435 \u043D\u0430\u0439\u0434\u0435\u043D" }, 404);
       const now = (/* @__PURE__ */ new Date()).toISOString();
       await env.DB.prepare(`INSERT INTO meals(student_id,benefit,orphan,note,added_at,updated_at) VALUES(?,?,?,?,?,?)
                 ON CONFLICT(student_id) DO UPDATE SET benefit=excluded.benefit,orphan=excluded.orphan,note=excluded.note,updated_at=excluded.updated_at`).bind(studentId, benefit, orphan, note, now, now).run();
-      await webAudit(env, actor, "meal_save", st.name + " / " + (benefit ? "\u043B\u044C\u0433\u043E\u0442\u0430" : "\u0431\u0435\u0437 \u043B\u044C\u0433\u043E\u0442\u044B") + (orphan ? " / \u0441\u0438\u0440\u043E\u0442\u0430" : ""));
+      const categoryName = orphan ? "\u0441\u0438\u0440\u043E\u0442\u0430" : benefit ? "\u043B\u044C\u0433\u043E\u0442\u043D\u0438\u043A" : "\u043F\u043B\u0430\u0442\u043D\u0438\u043A";
+      await webAudit(env, actor, "meal_save", st.name + " / " + categoryName);
       return jsonResponse({ ok: true });
     }
     if (path === "/api/meals/delete" && request.method === "POST") {
