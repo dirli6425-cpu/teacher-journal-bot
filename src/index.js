@@ -26265,7 +26265,7 @@ c.innerHTML='<div class="section-head"><h2>\u{1F465} \u041F\u043E\u043B\u044C\u0
  return '<div class="list-item"><div style="flex:1"><b>'+esc(u.display_name||u.login||u.telegram_user_id||'\u0410\u043A\u043A\u0430\u0443\u043D\u0442')+'</b>'+
  '<div class="small muted">'+esc(u.login||'\u0431\u0435\u0437 \u043B\u043E\u0433\u0438\u043D\u0430')+' \xB7 '+esc(u.role)+' \xB7 '+(Number(u.enabled)?'\u0430\u043A\u0442\u0438\u0432\u0435\u043D':'\u043E\u0442\u043A\u043B\u044E\u0447\u0451\u043D')+
  (u.telegram_user_id?' \xB7 TG '+esc(u.telegram_user_id):'')+'</div></div>'+
- (u.role!=='owner'?'<button class="btn secondary" data-toggle="'+u.id+'" data-enabled="'+Number(u.enabled)+'">'+(Number(u.enabled)?'\u041E\u0442\u043A\u043B\u044E\u0447\u0438\u0442\u044C':'\u0412\u043A\u043B\u044E\u0447\u0438\u0442\u044C')+'</button>':'<span class="pill">👑 Сардак Алексей</span>')+
+ (u.role!=='owner'?'<div class="actions"><button class="btn secondary" data-edit="'+u.id+'">✏️ Изменить</button><button class="btn secondary" data-toggle="'+u.id+'" data-enabled="'+Number(u.enabled)+'">'+(Number(u.enabled)?'Отключить':'Включить')+'</button></div>':'<span class="pill">👑 Сардак Алексей</span>')+
  '</div>';
 }).join('')+'</div>';
 
@@ -26332,6 +26332,30 @@ document.getElementById('newAccount').onclick=function(){
    }
  };
 };
+
+document.querySelectorAll('[data-edit]').forEach(function(b){
+ b.onclick=function(){
+   var id=Number(b.dataset.edit),u=(d.accounts||[]).find(function(x){return Number(x.id)===id}); if(!u)return;
+   var selected=[];try{selected=JSON.parse(u.permissions_json||'[]');if(!Array.isArray(selected))selected=[]}catch(e){}
+   modal('<h3>✏️ Изменить пользователя</h3>'+
+   '<div class="field"><label>Имя</label><input id="editName" value="'+esc(u.display_name||'')+'"></div>'+
+   '<div class="field"><label>Логин</label><input value="'+esc(u.login||'')+'" disabled></div>'+
+   '<div class="field"><label>Telegram ID</label><input id="editTg" inputmode="numeric" value="'+esc(u.telegram_user_id||'')+'"></div>'+
+   '<div class="field"><label>Роль</label><select id="editRole"><option value="teacher" '+(u.role==='teacher'?'selected':'')+'>Преподаватель</option><option value="viewer" '+(u.role==='viewer'?'selected':'')+'>Только просмотр</option></select></div>'+
+   '<div><b>Права доступа</b><div class="perm-grid">'+perms.map(function(p){var on=selected.includes(p[0]);return '<label class="perm-card '+(on?'on':'')+'"><input type="checkbox" data-edit-perm="'+p[0]+'" '+(on?'checked':'')+'><span class="perm-icon">'+p[1]+'</span><span class="perm-text"><b>'+p[2]+'</b><span>'+p[3]+'</span></span></label>'}).join('')+'</div></div>'+
+   '<div id="editError" class="small" style="color:#ffbe55;margin-top:10px"></div>'+
+   '<div class="actions" style="margin-top:12px"><button class="btn" id="saveEdit">💾 Сохранить</button><button class="btn secondary" id="changePass">🔑 Пароль</button><button class="btn secondary" id="deleteAcc">🗑️ Удалить</button></div>');
+   document.querySelectorAll('[data-edit-perm]').forEach(function(ch){ch.onchange=function(){ch.closest('.perm-card').classList.toggle('on',ch.checked)}});
+   document.getElementById('saveEdit').onclick=async function(){
+     var tg=document.getElementById('editTg').value.trim(),err=document.getElementById('editError');
+     if(tg&&!/^\\d{5,20}$/.test(tg)){err.textContent='⚠️ Telegram ID — только цифры';return}
+     var ps=[].slice.call(document.querySelectorAll('[data-edit-perm]:checked')).map(function(x){return x.dataset.editPerm});
+     try{await api('/api/admin/accounts/update',{method:'POST',body:JSON.stringify({id:id,display_name:document.getElementById('editName').value.trim(),telegram_user_id:tg,role:document.getElementById('editRole').value,permissions:ps})});closeModal();toast('Пользователь обновлён');go('users')}catch(e){err.textContent='⚠️ '+e.message}
+   };
+   document.getElementById('changePass').onclick=async function(){var pass=prompt('Новый пароль (минимум 8 символов):','');if(pass===null)return;if(pass.length<8){toast('Пароль минимум 8 символов');return}try{await api('/api/admin/accounts/password',{method:'POST',body:JSON.stringify({id:id,password:pass})});toast('Пароль изменён')}catch(e){toast(e.message)}};
+   document.getElementById('deleteAcc').onclick=async function(){if(!confirm('Удалить пользователя?'))return;try{await api('/api/admin/accounts/delete',{method:'POST',body:JSON.stringify({id:id})});closeModal();toast('Пользователь удалён');go('users')}catch(e){toast(e.message)}};
+ };
+});
 
 document.querySelectorAll('[data-toggle]').forEach(function(b){
  b.onclick=async function(){
