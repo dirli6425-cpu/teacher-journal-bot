@@ -21216,11 +21216,11 @@ ${JSON.stringify(result)}`);
       }
       if (request.method === "GET" && url.pathname === "/android/update.json") {
         return jsonResponse({
-          versionCode: 8,
-          versionName: "1.2.0",
+          versionCode: 10,
+          versionName: "1.1.3",
           required: false,
           notes: "\u0412\u0441\u0442\u0440\u043E\u0435\u043D\u043E \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435 \u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u044F \u0447\u0435\u0440\u0435\u0437 Cloudflare.",
-          apkUrl: "https://github.com/dirli6425-cpu/teacher-journal-bot/releases/download/1.1.2/app-debug.apk"
+          apkUrl: "https://github.com/dirli6425-cpu/teacher-journal-bot/releases/download/1.1.3/app-debug.apk"
         });
       }
       if (request.method === "GET" && url.pathname === "/android/latest.apk") {
