@@ -21216,11 +21216,11 @@ ${JSON.stringify(result)}`);
       }
       if (request.method === "GET" && url.pathname === "/android/update.json") {
         return jsonResponse({
-          versionCode: 12,
-          versionName: "2.0.1",
+          versionCode: 13,
+          versionName: "2.1.0",
           required: true,
-          notes: "Journal 102 2.0.1 — новый Obsidian-дизайн, улучшенная навигация и обновлённый интерфейс.",
-          apkUrl: "https://github.com/dirli6425-cpu/teacher-journal-bot/releases/download/2.0.1/app-debug.apk"
+          notes: "Journal 102 2.1.0 ULTRA — полностью новый премиальный интерфейс: Control Center, новый экран входа, Obsidian UI, улучшенные карточки, навигация, пары и мобильное управление.",
+          apkUrl: "https://github.com/dirli6425-cpu/teacher-journal-bot/releases/download/2.1.0/app-debug.apk"
         });
       }
       if (request.method === "GET" && url.pathname === "/android/latest.apk") {
