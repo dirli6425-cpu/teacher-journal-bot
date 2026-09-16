@@ -21216,11 +21216,11 @@ ${JSON.stringify(result)}`);
       }
       if (request.method === "GET" && url.pathname === "/android/update.json") {
         return jsonResponse({
-          versionCode: 11,
-          versionName: "2.0.0",
+          versionCode: 12,
+          versionName: "2.0.1",
           required: true,
-          notes: "\u0412\u0441\u0442\u0440\u043E\u0435\u043D\u043E \u043E\u0431\u043D\u043E\u0432\u043B\u0435\u043D\u0438\u0435 \u043F\u0440\u0438\u043B\u043E\u0436\u0435\u043D\u0438\u044F \u0447\u0435\u0440\u0435\u0437 Cloudflare.",
-          apkUrl: "https://github.com/dirli6425-cpu/teacher-journal-bot/releases/download/2.0.0/app-debug.apk"
+          notes: "Journal 102 2.0.1 — новый Obsidian-дизайн, улучшенная навигация и обновлённый интерфейс.",
+          apkUrl: "https://github.com/dirli6425-cpu/teacher-journal-bot/releases/download/2.0.1/app-debug.apk"
         });
       }
       if (request.method === "GET" && url.pathname === "/android/latest.apk") {
@@ -25828,6 +25828,16 @@ button,input,select,textarea{font:inherit}.hidden{display:none!important}.muted{
 .perm-text span{font-size:11px;color:var(--muted)}
 @media(max-width:760px){.perm-grid{grid-template-columns:1fr}}
 
+
+.pair-switcher{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.pair-switcher .btn{width:100%;padding:12px 8px;white-space:nowrap}
+.pair-student{gap:12px}
+@media(max-width:640px){
+ .pair-switcher{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .pair-switcher .btn{min-height:48px;font-size:14px}
+ .pair-student{align-items:center}
+ .pair-student .status-btn{flex:0 0 auto}
+}
 </style>
 <script src="https://telegram.org/js/telegram-web-app.js"><\/script>
 </head>
@@ -26237,7 +26247,22 @@ pages.lineup=async function(c){
   await renderCalendar();
   await renderDay();
 }
-pages.pairs=async function(c){await loadStudents();var d=await api('/api/pairs?date='+state.date);var lessons=d.lessons||4;var head='<th>\u0423\u0447\u0435\u043D\u0438\u043A</th>';for(var l=1;l<=lessons;l++)head+='<th>'+l+' \u043F\u0430\u0440\u0430</th>';var rows=state.students.map(function(s){var t='<tr><td><b>'+esc(s.name)+'</b></td>';for(var l=1;l<=lessons;l++){var st=(d.statuses[String(l)]||{})[String(s.id)]||'none';t+='<td>'+statusButton(st,s.id,'pair',state.date,l)+'</td>'}return t+'</tr>'}).join('');c.innerHTML='<div class="section-head"><h2>\u{1F4DA} \u041F\u043E \u043F\u0430\u0440\u0430\u043C</h2><div class="actions"><input type="date" id="pairDate" value="'+state.date+'"></div></div><div class="table-wrap"><table class="table"><thead><tr>'+head+'</tr></thead><tbody>'+rows+'</tbody></table></div>';document.getElementById('pairDate').onchange=function(){state.date=this.value;go('pairs')};bindStatusButtons()}
+pages.pairs=async function(c){
+ await loadStudents();var d=await api('/api/pairs?date='+state.date),lessons=d.lessons||4;
+ if(!state.pairLesson||state.pairLesson>lessons)state.pairLesson=1;
+ function drawPair(){
+  var l=state.pairLesson;
+  var nav='<div class="pair-switcher">'+Array.from({length:lessons},function(_,i){var n=i+1;return '<button class="btn '+(n===l?'':'secondary')+'" data-pair-pick="'+n+'">'+n+' пара</button>'}).join('')+'</div>';
+  var rows=state.students.map(function(st){var val=(d.statuses[String(l)]||{})[String(st.id)]||'none';return '<div class="list-item pair-student"><div style="flex:1;min-width:0"><b>'+esc(st.name)+'</b><div class="small muted">'+l+' пара</div></div>'+statusButton(val,st.id,'pair',state.date,l)+'</div>'}).join('');
+  c.innerHTML='<div class="section-head"><h2>📚 По парам</h2><div class="actions"><input type="date" id="pairDate" value="'+state.date+'"></div></div>'+
+   '<div class="card"><div class="small muted" style="margin-bottom:8px">Выберите пару</div>'+nav+'</div>'+
+   '<div class="card" style="margin-top:12px"><div class="section-head"><h3 style="margin:0">'+l+' пара</h3><span class="pill">'+state.students.length+' студентов</span></div><div class="list">'+rows+'</div></div>';
+  document.getElementById('pairDate').onchange=function(){state.date=this.value;go('pairs')};
+  document.querySelectorAll('[data-pair-pick]').forEach(function(b){b.onclick=function(){state.pairLesson=Number(b.dataset.pairPick);drawPair()}});
+  bindStatusButtons();
+ }
+ drawPair();
+}
 pages.students=async function(c){await loadStudents();c.innerHTML='<div class="section-head"><h2>\u{1F464} \u0421\u0442\u0443\u0434\u0435\u043D\u0442\u044B</h2><div class="actions"><button class="btn" id="addStudent">+ \u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C</button></div></div><div class="list">'+state.students.map(function(s){return '<div class="list-item"><div class="avatar">'+esc(s.name[0])+'</div><div style="flex:1"><b>'+esc(s.name)+'</b></div><button class="btn secondary" data-card="'+s.id+'">\u041A\u0430\u0440\u0442\u043E\u0447\u043A\u0430</button></div>'}).join('')+'</div>';document.getElementById('addStudent').onclick=function(){modal('<h3>\u041D\u043E\u0432\u044B\u0439 \u0443\u0447\u0435\u043D\u0438\u043A</h3><div class="field"><input id="newStudent" placeholder="\u0424\u0430\u043C\u0438\u043B\u0438\u044F \u0418\u043C\u044F"></div><button class="btn" id="saveStudent">\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C</button>');document.getElementById('saveStudent').onclick=async function(){await api('/api/students',{method:'POST',body:JSON.stringify({name:document.getElementById('newStudent').value})});closeModal();toast('\u0414\u043E\u0431\u0430\u0432\u043B\u0435\u043D');go('students')}};document.querySelectorAll('[data-card]').forEach(function(b){b.onclick=async function(){var d=await api('/api/student/'+b.dataset.card);modal('<h3>'+esc(d.student.name)+'</h3><div class="grid">'+metric('\u041F\u043E\u0441\u0435\u0449\u0430\u0435\u043C\u043E\u0441\u0442\u044C',d.attendance_percent+'%')+metric('\u274C \u041F\u0440\u043E\u043F\u0443\u0441\u043A\u0438',d.absent)+metric('\u{1F912} \u0411\u043E\u043B\u0435\u0435\u0442',d.sick)+metric('\u{1F4DD} \u0417\u0430\u044F\u0432\u043B\u0435\u043D\u0438\u044F',d.application)+'</div><h3>\u041F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 \u0441\u043E\u0431\u044B\u0442\u0438\u044F</h3><div class="list">'+d.events.map(function(e){var sm=statusMeta[e.status]||['',''];var label=e.summary_label||((sm[0]+' '+sm[1]).trim());return '<div class="list-item"><b>'+esc(e.date)+'</b><div class="small muted">'+esc(label)+'</div></div>'}).join('')+'</div>')}})}
 pages.calendar=async function(c){var d=await api('/api/calendar?month='+state.month);var first=new Date(state.month+'-01T12:00:00'),start=(first.getDay()+6)%7,days=new Date(first.getFullYear(),first.getMonth()+1,0).getDate(),cells='';for(var i=0;i<start;i++)cells+='<div></div>';for(var x=1;x<=days;x++){var ds=state.month+'-'+String(x).padStart(2,'0'),q=d.days[ds]||{};cells+='<div class="day"><strong>'+x+'</strong><div>\u274C '+(q.absent||0)+'</div><div>\u{1F912} '+(q.sick||0)+' \xB7 \u{1F4DD} '+(q.application||0)+'</div><div>\u2194\uFE0F '+(q.partial||0)+' \u0447\u0430\u0441\u0442\u0438\u0447\u043D\u043E</div></div>'}c.innerHTML='<div class="section-head"><h2>\u{1F4C5} \u041A\u0430\u043B\u0435\u043D\u0434\u0430\u0440\u044C</h2><div class="actions"><input type="month" id="calMonth" value="'+state.month+'"></div></div><div class="calendar">'+cells+'</div>';document.getElementById('calMonth').onchange=function(){state.month=this.value;go('calendar')}}
 pages.health=async function(c){var d=await api('/api/health?month='+state.month);c.innerHTML='<div class="section-head"><h2>\u{1F912} \u0411\u043E\u043B\u0435\u0437\u043D\u0438 \u0438 \u0437\u0430\u044F\u0432\u043B\u0435\u043D\u0438\u044F</h2><div class="actions"><input type="month" id="healthMonth" value="'+state.month+'"></div></div><div class="grid">'+metric('\u{1F912} \u0411\u043E\u043B\u0435\u0437\u043D\u0438',d.sick_total)+metric('\u{1F4DD} \u0417\u0430\u044F\u0432\u043B\u0435\u043D\u0438\u044F',d.application_total)+'</div><div class="card" style="margin-top:14px"><div class="list">'+d.rows.map(function(x){return '<div class="list-item"><b style="flex:1">'+esc(x.name)+'</b><span class="pill">\u{1F912} '+x.sick+'</span><span class="pill">\u{1F4DD} '+x.application+'</span></div>'}).join('')+'</div></div>';document.getElementById('healthMonth').onchange=function(){state.month=this.value;go('health')}}
