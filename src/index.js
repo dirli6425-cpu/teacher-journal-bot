@@ -21219,8 +21219,8 @@ ${JSON.stringify(result)}`);
           // Activate the new mandatory update only after a production APK, signed
           // with the existing application's key, has been uploaded to this URL.
           // Keep the supplied code-14 update until the matching signed code-15 APK is published.
-          versionCode: env.ANDROID_APK_URL ? (Number(env.ANDROID_VERSION_CODE) || 16) : 14,
-          versionName: env.ANDROID_APK_URL ? String(env.ANDROID_VERSION_NAME || "2.1.3") : "2.1.1",
+          versionCode: env.ANDROID_APK_URL ? (Number(env.ANDROID_VERSION_CODE) || 16) : 16,
+          versionName: env.ANDROID_APK_URL ? String(env.ANDROID_VERSION_NAME || "2.1.3") : "2.1.3",
           required: true,
           notes: env.ANDROID_APK_URL
             ? "Журнал 102 2.1.3 — исправлены индикаторы «В сети», добавлены обновление статуса и понятное время последней активности. Сохранены премиальный дизайн и исправленный Excel-экспорт."
