@@ -21225,7 +21225,7 @@ ${JSON.stringify(result)}`);
           notes: env.ANDROID_APK_URL
             ? "Журнал 102 2.1.3 — исправлены индикаторы «В сети», добавлены обновление статуса и понятное время последней активности. Сохранены премиальный дизайн и исправленный Excel-экспорт."
             : "Текущая опубликованная версия Журнала 102.",
-          apkUrl: env.ANDROID_APK_URL || "https://github.com/dirli6425-cpu/teacher-journal-bot/releases/download/2.1.1/app-debug.apk"
+          apkUrl: env.ANDROID_APK_URL || "https://github.com/dirli6425-cpu/teacher-journal-bot/releases/download/2.1.3/app-debug.apk"
         });
       }
       if (request.method === "GET" && url.pathname === "/android/latest.apk") {
