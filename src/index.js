@@ -26112,7 +26112,7 @@ pages.meals=async function(c){
 
   c.innerHTML=
     '<div class="page-heading"><div><h2>Питание</h2><p>Выберите день и отметьте учеников</p></div>'+
-    '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn secondary" id="mealProfiles">⚙️ Список питания</button><button class="btn" id="mealMonthReport">📄 Отчёт за месяц</button></div></div>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn secondary" id="mealProfiles">⚙️ Список питания</button><button class="btn secondary" id="mealWordReport">⬇️ Табель Word</button><button class="btn" id="mealMonthReport">📄 Отчёт за месяц</button></div></div>'+
     '<div class="card" style="margin-bottom:14px"><div style="display:flex;gap:8px;flex-wrap:wrap" id="mealMonths">'+
       Object.keys(monthNames).map(function(m){return '<button class="btn '+(m===month?'':'secondary')+'" data-mm="'+m+'">'+monthNames[m]+'</button>'}).join('')+
     '</div></div>'+
@@ -26165,6 +26165,7 @@ pages.meals=async function(c){
 
   document.querySelectorAll('[data-mm]').forEach(function(b){b.onclick=function(){month=b.dataset.mm;selectedDate=month==='2026-09'?'2026-09-14':month+'-01';var d=new Date(selectedDate+'T12:00:00');while(d.getDay()===0||d.getDay()===6){d.setDate(d.getDate()+1);selectedDate=d.toISOString().slice(0,10)};goMealsMonth()}});
   async function goMealsMonth(){document.querySelectorAll('[data-mm]').forEach(function(x){x.className='btn '+(x.dataset.mm===month?'':'secondary')});await renderCalendar();await renderDay()}
+  document.getElementById('mealWordReport').onclick=function(){window.location.href='/api/meals/word?month='+month};
   document.getElementById('mealMonthReport').onclick=function(){window.open('/api/meals/report?month='+month,'_blank')};
 
   document.getElementById('mealProfiles').onclick=function(){
@@ -27853,6 +27854,82 @@ async function handleWebApi(request, env, url) {
       }
       await webAudit(env,actor,"meal_day_all",date+" / "+(selected?"все":"очищено"));
       return jsonResponse({ok:true});
+    }
+
+    if (path === "/api/meals/word" && request.method === "GET") {
+      await requireWeb(request,env,"view_journal");
+      const monthRaw=String(url.searchParams.get("month")||"");
+      const month=/^\d{4}-(0[1-9]|1[0-2])$/.test(monthRaw)?monthRaw:"2026-09";
+      const [yearS,monthS]=month.split("-");
+      const year=Number(yearS),monthNo=Number(monthS);
+      const daysInMonth=new Date(Date.UTC(year,monthNo,0)).getUTCDate();
+      const monthRu=["","январь","февраль","март","апрель","май","июнь","июль","август","сентябрь","октябрь","ноябрь","декабрь"][monthNo];
+
+      const profiles=(await env.DB.prepare(`
+        SELECT m.student_id,s.name,m.benefit,m.orphan
+        FROM meals m JOIN students s ON s.id=m.student_id
+        WHERE s.active=1
+        ORDER BY CASE WHEN s.name='Кориков Денис' THEN 1 WHEN s.name='Гуска Александр' THEN 2 ELSE 0 END,
+                 s.name COLLATE NOCASE
+      `).all()).results||[];
+
+      const eaten=(await env.DB.prepare(`
+        SELECT student_id,date FROM meal_days
+        WHERE substr(date,1,7)=?
+        ORDER BY date
+      `).bind(month).all()).results||[];
+
+      const byStudent={};
+      for(const r of eaten){
+        const id=String(r.student_id);
+        (byStudent[id]||(byStudent[id]=new Set())).add(Number(String(r.date).slice(8,10)));
+      }
+
+      const escW=(x)=>String(x??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+      const cat=(r)=>Number(r.orphan)===1?"Сирота":Number(r.benefit)===1?"Льготник":"Платник";
+      const dayHead=Array.from({length:daysInMonth},(_,i)=>`<th class="day">${i+1}</th>`).join("");
+      const rows=profiles.map((r,i)=>{
+        const set=byStudent[String(r.student_id)]||new Set();
+        const marks=Array.from({length:daysInMonth},(_,d)=>`<td class="day">${set.has(d+1)?"✓":""}</td>`).join("");
+        return `<tr><td class="num">${i+1}</td><td class="person"><b>${escW(r.name)}</b><br><span>${cat(r)}</span></td>${marks}<td class="total">${set.size}</td></tr>`;
+      }).join("");
+
+      const paid=profiles.filter(r=>Number(r.benefit)!==1&&Number(r.orphan)!==1).length;
+      const benefit=profiles.filter(r=>Number(r.benefit)===1&&Number(r.orphan)!==1).length;
+      const orphan=profiles.filter(r=>Number(r.orphan)===1).length;
+
+      const html=`<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" lang="ru">
+      <head><meta charset="utf-8"><title>Табель питания 102 группы</title>
+      <style>
+      @page Section1{size:841.9pt 595.3pt;mso-page-orientation:landscape;margin:24pt 22pt 24pt 22pt}
+      div.Section1{page:Section1}
+      body{font-family:"Times New Roman",serif;color:#000;font-size:9pt}
+      h1{text-align:center;font-size:16pt;margin:0 0 4pt;font-weight:700}
+      .sub{text-align:center;font-size:11pt;margin-bottom:10pt}
+      table{border-collapse:collapse;width:100%;table-layout:fixed}
+      th,td{border:1px solid #000;text-align:center;vertical-align:middle;padding:2pt 1pt;height:20pt}
+      th{font-weight:700;background:#eee}
+      .num{width:20pt}.person{width:130pt;text-align:left;padding-left:4pt}.person span{font-size:8pt;font-style:italic}
+      .day{width:18pt}.total{width:35pt;font-weight:700}
+      .summary{margin-top:10pt;font-size:10pt}
+      .sign{margin-top:24pt;width:100%}.sign td{border:0;text-align:left;height:auto;padding:4pt}
+      </style></head><body><div class="Section1">
+      <h1>ТАБЕЛЬ ПИТАНИЯ</h1>
+      <div class="sub">за ${monthRu} ${year} г. · группа № 102</div>
+      <table>
+        <thead><tr><th class="num">№</th><th class="person">Фамилия, имя<br><span>категория питания</span></th>${dayHead}<th class="total">Итого<br>дней</th></tr></thead>
+        <tbody>${rows||`<tr><td colspan="${daysInMonth+3}">Список питания пуст</td></tr>`}</tbody>
+      </table>
+      <div class="summary"><b>Всего:</b> платники — ${paid}; льготники — ${benefit}; сироты — ${orphan}; учеников — ${profiles.length}.</div>
+      <table class="sign"><tr><td>Ответственный __________________ / __________________</td><td style="text-align:right">Дата __________________</td></tr></table>
+      </div></body></html>`;
+
+      const filename=`tabel_pitaniya_102_${month}.doc`;
+      return new Response("\uFEFF"+html,{headers:{
+        "content-type":"application/msword; charset=UTF-8",
+        "content-disposition":`attachment; filename="${filename}"`,
+        "cache-control":"no-store"
+      }});
     }
 
     if (path === "/api/meals/report" && request.method === "GET") {
