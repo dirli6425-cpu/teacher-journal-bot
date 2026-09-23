@@ -26112,7 +26112,7 @@ pages.meals=async function(c){
 
   c.innerHTML=
     '<div class="page-heading"><div><h2>Питание</h2><p>Выберите день и отметьте учеников</p></div>'+
-    '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn secondary" id="mealProfiles">⚙️ Список питания</button><button class="btn secondary" id="mealWordReport">⬇️ Табель Word</button><button class="btn" id="mealMonthReport">📄 Отчёт за месяц</button></div></div>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn secondary" id="mealProfiles">⚙️ Список питания</button><button class="btn secondary" id="mealHistory">🗂 История документов</button><button class="btn secondary" id="mealWordReport">⬇️ Табель Word</button><button class="btn" id="mealMonthReport">📄 Отчёт за месяц</button></div></div>'+
     '<div class="card" style="margin-bottom:14px"><div style="display:flex;gap:8px;flex-wrap:wrap" id="mealMonths">'+
       Object.keys(monthNames).map(function(m){return '<button class="btn '+(m===month?'':'secondary')+'" data-mm="'+m+'">'+monthNames[m]+'</button>'}).join('')+
     '</div></div>'+
@@ -26166,6 +26166,17 @@ pages.meals=async function(c){
   document.querySelectorAll('[data-mm]').forEach(function(b){b.onclick=function(){month=b.dataset.mm;selectedDate=month==='2026-09'?'2026-09-14':month+'-01';var d=new Date(selectedDate+'T12:00:00');while(d.getDay()===0||d.getDay()===6){d.setDate(d.getDate()+1);selectedDate=d.toISOString().slice(0,10)};goMealsMonth()}});
   async function goMealsMonth(){document.querySelectorAll('[data-mm]').forEach(function(x){x.className='btn '+(x.dataset.mm===month?'':'secondary')});await renderCalendar();await renderDay()}
   document.getElementById('mealWordReport').onclick=function(){window.location.href='/api/meals/word?month='+month};
+  document.getElementById('mealHistory').onclick=async function(){
+    var h=await api('/api/meals/archive');
+    modal('<h3>🗂 История табелей питания</h3><p class="modal-sub">Сохранённые месяцы не меняются, даже если позже исправить питание в журнале.</p>'+
+      '<button class="btn" id="mealArchiveCurrent" style="width:100%;margin-bottom:12px">💾 Сохранить '+(monthNames[month]||month)+' в историю</button>'+
+      '<div class="list">'+((h.rows||[]).length?(h.rows||[]).map(function(x){return '<div class="list-item"><div style="flex:1"><b>'+esc(x.label)+'</b><div class="small muted">Сохранён '+esc(x.saved_at_text||x.saved_at)+'</div></div><button class="btn secondary mealArchiveDownload" data-month="'+x.month+'">⬇️ Word</button></div>'}).join(''):'<div class="muted">Сохранённых табелей пока нет.</div>')+'</div>');
+    document.getElementById('mealArchiveCurrent').onclick=async function(){
+      await api('/api/meals/archive',{method:'POST',body:JSON.stringify({month:month})});
+      closeModal();toast('Табель '+(monthNames[month]||month)+' сохранён');document.getElementById('mealHistory').click();
+    };
+    document.querySelectorAll('.mealArchiveDownload').forEach(function(b){b.onclick=function(){window.location.href='/api/meals/word?month='+b.dataset.month+'&archive=1'}});
+  };
   document.getElementById('mealMonthReport').onclick=function(){window.open('/api/meals/report?month='+month,'_blank')};
 
   document.getElementById('mealProfiles').onclick=function(){
@@ -27856,6 +27867,46 @@ async function handleWebApi(request, env, url) {
       return jsonResponse({ok:true});
     }
 
+    if (path === "/api/meals/archive" && request.method === "GET") {
+      await requireWeb(request,env,"view_journal");
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS meal_report_archive(
+        month TEXT PRIMARY KEY,
+        snapshot TEXT NOT NULL,
+        saved_at TEXT NOT NULL,
+        saved_by TEXT
+      )`).run();
+      const rows=(await env.DB.prepare(`SELECT month,saved_at,saved_by FROM meal_report_archive ORDER BY month DESC`).all()).results||[];
+      const names=["","Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"];
+      return jsonResponse({rows:rows.map(r=>{
+        const p=String(r.month).split("-");
+        return {...r,label:(names[Number(p[1])]||r.month)+" "+p[0],saved_at_text:String(r.saved_at||"").replace("T"," ").slice(0,16)};
+      })});
+    }
+    if (path === "/api/meals/archive" && request.method === "POST") {
+      const actor=await requireWeb(request,env,"view_journal");
+      const m=String(body.month||"");
+      if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(m))return jsonResponse({error:"Неверный месяц"},400);
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS meal_report_archive(
+        month TEXT PRIMARY KEY,
+        snapshot TEXT NOT NULL,
+        saved_at TEXT NOT NULL,
+        saved_by TEXT
+      )`).run();
+      const profiles=(await env.DB.prepare(`
+        SELECT m.student_id,s.name,m.benefit,m.orphan
+        FROM meals m JOIN students s ON s.id=m.student_id
+        WHERE s.active=1
+        ORDER BY CASE WHEN s.name='Кориков Денис' THEN 1 WHEN s.name='Гуска Александр' THEN 2 ELSE 0 END,s.name COLLATE NOCASE
+      `).all()).results||[];
+      const eaten=(await env.DB.prepare(`SELECT student_id,date FROM meal_days WHERE substr(date,1,7)=? ORDER BY date`).bind(m).all()).results||[];
+      const now=new Date().toISOString();
+      const snapshot=JSON.stringify({month:m,profiles,eaten});
+      await env.DB.prepare(`INSERT INTO meal_report_archive(month,snapshot,saved_at,saved_by) VALUES(?,?,?,?)
+        ON CONFLICT(month) DO UPDATE SET snapshot=excluded.snapshot,saved_at=excluded.saved_at,saved_by=excluded.saved_by`)
+        .bind(m,snapshot,now,String(actor?.username||actor?.login||actor?.id||"")).run();
+      return jsonResponse({ok:true,month:m,saved_at:now});
+    }
+
     if (path === "/api/meals/word" && request.method === "GET") {
       await requireWeb(request,env,"view_journal");
       const monthRaw=String(url.searchParams.get("month")||"");
@@ -27865,15 +27916,23 @@ async function handleWebApi(request, env, url) {
       const monthRu=["","январь","февраль","март","апрель","май","июнь","июль","август","сентябрь","октябрь","ноябрь","декабрь"][monthNo];
       const daysInMonth=new Date(Date.UTC(year,monthNo,0)).getUTCDate();
 
-      const profiles=(await env.DB.prepare(`
-        SELECT m.student_id,s.name,m.benefit,m.orphan
-        FROM meals m JOIN students s ON s.id=m.student_id
-        WHERE s.active=1
-        ORDER BY CASE WHEN s.name='Кориков Денис' THEN 1 WHEN s.name='Гуска Александр' THEN 2 ELSE 0 END,s.name COLLATE NOCASE
-      `).all()).results||[];
-      const eaten=(await env.DB.prepare(`
-        SELECT student_id,date FROM meal_days WHERE substr(date,1,7)=? ORDER BY date
-      `).bind(month).all()).results||[];
+      let profiles,eaten;
+      if(url.searchParams.get("archive")==="1"){
+        await env.DB.prepare(`CREATE TABLE IF NOT EXISTS meal_report_archive(month TEXT PRIMARY KEY,snapshot TEXT NOT NULL,saved_at TEXT NOT NULL,saved_by TEXT)`).run();
+        const saved=await env.DB.prepare(`SELECT snapshot FROM meal_report_archive WHERE month=?`).bind(month).first();
+        if(!saved)return jsonResponse({error:"Сохранённый табель за этот месяц не найден"},404);
+        const snap=JSON.parse(saved.snapshot||"{}");
+        profiles=Array.isArray(snap.profiles)?snap.profiles:[];
+        eaten=Array.isArray(snap.eaten)?snap.eaten:[];
+      }else{
+        profiles=(await env.DB.prepare(`
+          SELECT m.student_id,s.name,m.benefit,m.orphan
+          FROM meals m JOIN students s ON s.id=m.student_id
+          WHERE s.active=1
+          ORDER BY CASE WHEN s.name='Кориков Денис' THEN 1 WHEN s.name='Гуска Александр' THEN 2 WHEN s.name='Гуска Александр' THEN 2 ELSE 0 END,s.name COLLATE NOCASE
+        `).all()).results||[];
+        eaten=(await env.DB.prepare(`SELECT student_id,date FROM meal_days WHERE substr(date,1,7)=? ORDER BY date`).bind(month).all()).results||[];
+      }
       const byStudent={};
       for(const r of eaten){
         const id=String(r.student_id);
@@ -28023,6 +28082,18 @@ async function handleWebApi(request, env, url) {
 
     if (path === "/api/meals" && request.method === "GET") {
       await requireWeb(request, env, "view_journal");
+      // On first opening Nutrition in a new month, freeze the previous month once.
+      try{
+        const now=new Date(),first=new Date(Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),1)),prev=new Date(first.getTime()-86400000);
+        const pm=prev.toISOString().slice(0,7);
+        await env.DB.prepare(`CREATE TABLE IF NOT EXISTS meal_report_archive(month TEXT PRIMARY KEY,snapshot TEXT NOT NULL,saved_at TEXT NOT NULL,saved_by TEXT)`).run();
+        const exists=await env.DB.prepare(`SELECT month FROM meal_report_archive WHERE month=?`).bind(pm).first();
+        if(!exists){
+          const pp=(await env.DB.prepare(`SELECT m.student_id,s.name,m.benefit,m.orphan FROM meals m JOIN students s ON s.id=m.student_id WHERE s.active=1 ORDER BY s.name COLLATE NOCASE`).all()).results||[];
+          const pe=(await env.DB.prepare(`SELECT student_id,date FROM meal_days WHERE substr(date,1,7)=? ORDER BY date`).bind(pm).all()).results||[];
+          if(pp.length||pe.length)await env.DB.prepare(`INSERT INTO meal_report_archive(month,snapshot,saved_at,saved_by) VALUES(?,?,?,?)`).bind(pm,JSON.stringify({month:pm,profiles:pp,eaten:pe}),new Date().toISOString(),"auto").run();
+        }
+      }catch(_e){}
       const rows = (await env.DB.prepare(`SELECT m.student_id,s.name,m.benefit,m.orphan,m.note,m.added_at,m.updated_at
                 FROM meals m JOIN students s ON s.id=m.student_id WHERE s.active=1
                 ORDER BY CASE WHEN s.name='\u041A\u043E\u0440\u0438\u043A\u043E\u0432 \u0414\u0435\u043D\u0438\u0441' THEN 1 WHEN s.name='\u0413\u0443\u0441\u043A\u0430 \u0410\u043B\u0435\u043A\u0441\u0430\u043D\u0434\u0440' THEN 2 ELSE 0 END,s.name COLLATE NOCASE`).all()).results || [];
