@@ -27862,71 +27862,99 @@ async function handleWebApi(request, env, url) {
       const month=/^\d{4}-(0[1-9]|1[0-2])$/.test(monthRaw)?monthRaw:"2026-09";
       const [yearS,monthS]=month.split("-");
       const year=Number(yearS),monthNo=Number(monthS);
-      const daysInMonth=new Date(Date.UTC(year,monthNo,0)).getUTCDate();
       const monthRu=["","январь","февраль","март","апрель","май","июнь","июль","август","сентябрь","октябрь","ноябрь","декабрь"][monthNo];
+      const daysInMonth=new Date(Date.UTC(year,monthNo,0)).getUTCDate();
 
       const profiles=(await env.DB.prepare(`
         SELECT m.student_id,s.name,m.benefit,m.orphan
         FROM meals m JOIN students s ON s.id=m.student_id
         WHERE s.active=1
-        ORDER BY CASE WHEN s.name='Кориков Денис' THEN 1 WHEN s.name='Гуска Александр' THEN 2 ELSE 0 END,
-                 s.name COLLATE NOCASE
+        ORDER BY CASE WHEN s.name='Кориков Денис' THEN 1 WHEN s.name='Гуска Александр' THEN 2 ELSE 0 END,s.name COLLATE NOCASE
       `).all()).results||[];
-
       const eaten=(await env.DB.prepare(`
-        SELECT student_id,date FROM meal_days
-        WHERE substr(date,1,7)=?
-        ORDER BY date
+        SELECT student_id,date FROM meal_days WHERE substr(date,1,7)=? ORDER BY date
       `).bind(month).all()).results||[];
-
       const byStudent={};
       for(const r of eaten){
         const id=String(r.student_id);
         (byStudent[id]||(byStudent[id]=new Set())).add(Number(String(r.date).slice(8,10)));
       }
+      const category=(r)=>Number(r.orphan)===1?"Сирота":Number(r.benefit)===1?"Льготник":"Платник";
 
-      const escW=(x)=>String(x??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-      const cat=(r)=>Number(r.orphan)===1?"Сирота":Number(r.benefit)===1?"Льготник":"Платник";
-      const dayHead=Array.from({length:daysInMonth},(_,i)=>`<th class="day">${i+1}</th>`).join("");
-      const rows=profiles.map((r,i)=>{
-        const set=byStudent[String(r.student_id)]||new Set();
-        const marks=Array.from({length:daysInMonth},(_,d)=>`<td class="day">${set.has(d+1)?"✓":""}</td>`).join("");
-        return `<tr><td class="num">${i+1}</td><td class="person"><b>${escW(r.name)}</b><br><span>${cat(r)}</span></td>${marks}<td class="total">${set.size}</td></tr>`;
-      }).join("");
+      // Exact user Word template, converted once from .doc to .docx.
+      const templateB64="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9c6rN7xOtNH5+f4W8x4SD5rEARJIrJI4RAKJVRJHSCCxSuIYCSRWSZwggcQqicdIILFK4hQJJFZJPNmCxBESD5nE/h4TTKyZ2Ob6JRMP28Q2FzCZeNgmtrmCycTDNrHNJUwmHraJba5hMvGwTWxzEZOJh21im6uYTDxsE9tcxmTiYZtwHZOJNRMHrmMysW7CdUwm1k24jsnEugnXMZlYN+E6JhPrJlzHZGLdhOuYTKybcB2TiXUTrmMysW7CdUwm1kwcuo7JxLqJba5jFqXCoGgMRVWi30re+wv1rOT0A0w2K635z7e/vvk2Lxy7BZeHWnanXhg37LWbHGc98vkqhDwu43ZK+Pw5DO2j7vhyudFg/OinzzdVUbnjqy1rgaj101jWNx83miFRh4Gn8VIq+PizvZpH4IILLrjgggsuuOCCCy644IILLrh4MC7cruSCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrhopwulisAohfHBokRcNOaiKuMVucxXIYlxGbdT5ihRpmPceyEMjZU52ub/VkGZo6TjfpMk6jDwmKDZnwsuuOCCCy644IILLrjgggsuuOCijS7c7uSCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrhopwtljsAohaHMUToXVRmvyGW+CkmMy7idMkeJMh3j3gthaKzM0WHRsprdW5mjlON+kyTqMPCYoNmfCy644IILLrjgggsuuOCCCy644KKNLtzu5IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuGinC2WOwCiFocxROhdVGa/IZb4KSYzLuJ0yR4kyHePeC2ForMzRUdGymt1bmaOU436TJOow8Jig2Z8LLrjgggsuuOCCCy644IILLrjgoo0u3O7kggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy64aKcLZY7AKIWhzFE6F1UZr8hlvgpJjMu4nTJHiTId494LYWiszNFx0bKa3VuZo5TjfpMk6jDwmKDZnwsuuOCCCy644IILLrjgggsuuOCijS7c7uSCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrhopwtljsAohaHMUToXVRmvyGW+CkmMy7idMkeJMh3j3gthaKzM0UnRsprdW5mjlON+kyTqMPCYoNmfCy644IILLrjgggsuuOCCCy644KKNLtzu5IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuGinC2WOwCiFocxROhdVGa/IZb4KSYzLuJ0yR4kyHePeC2ForMzR46JlNbu3Mkcpx/0mSdRh4DFBsz8XXHDBBRdccMEFF1xwwQUXXHDBRRtduN3JBRdccMEFF1xwwQUXXHDBBRdccMEFF1xwwQUXXHDBBRdccMEFF1xwwQUXXHDBBRdccMEFF1xw0U4XyhyBUQpDmaN0LqoyXpHLfBWSGJdxO2WOEmU6xr0XwtBYmaPTomU1u7cyRynH/SZJ1GHgMUGzPxdccMEFF1xwwQUXXHDBBRdccMFFG1243ckFF1xwwQUXXHDBBRdccMEFF1xwwQUXXHDBBRdccMEFF1xwwQUXXHDBBRdccMEFF1xwwQUXXHDRThfKHIFRCkOZo3QuqjJekct8FZIYl3E7ZY4SZTrGvRfC0FiZoydFy2p2b2WOUo77TZKow8BjgmZ/LrjgggsuuOCCCy644IILLrjggos2unC7kwsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644KKdLpQ5AqMUhjJH6VxUZbwil/kqJDEu43bKHCXKdIx7L4ShsTJH+3tF02r2b3WOUg78TZqow8BzgqZ/LrjgggsuuOCCCy644IILLrjggos2unC/kwsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644KKdLtQ5AqMUhjpH6VxUZbwil/kqJDEu43bqHCXKdIx7L4ShuTpH+0XTavZvdY5SDvxNmqjDwHOCpn8uuOCCCy644IILLrjgggsuuOCCiza6cL+TCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgop0u1DkCoxSGOkfpXFRlvCKX+SokMS7jduocJcp0jHsvhKG5OkcHRdNq9m91jlIO/E2aqMPAc4Kmfy644IILLrjgggsuuOCCCy644IKLNrpwv5MLLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCinS7UOQKjFIY6R+lcVGW8Ipf5KiQxLuN26hwlynSMey+Eobk6R4dF02r2b3WOUg78TZqow8BzgqZ/LrjgggsuuOCCCy644IILLrjggos2unC/kwsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644KKdLtQ5AqMUhjpH6VxUZbwil/kqJDEu43bqHCXKdIx7L4ShuTpHR0XTavZvdY5SDvxNmqjDwHOCpn8uuOCCCy644IILLrjgggsuuOCCiza6cL+TCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgop0u1DkCoxSGOkfpXFRlvCKX+SokMS7jduocJcp0jHsvhKG5OkfHRdNq9m91jlIO/E2aqMPAc4Kmfy644IILLrjgggsuuOCCCy644IKLNrpwv5MLLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCinS7UOQKjFIY6R+lcVGW8Ipf5KiQxLuN26hwlynSMey+Eobk6RydF02r2b3WOknTw4Th/NQ9ONvkW52RFU886j05OD/5kbOpI8SihMwQuuOCCCy644IILLrjgggsuuOCCiza6cEuUCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgop0ulEICoxSGUkjpXFRlvCKX+SokMS7jdkohJcp0jHsvhKG5UkiPi6bV7N9KIaUc+Js0UYeB5wRN/1xwwQUXXHDBBRdccMEFF1xwwQUXbXThficXXHDBBRdccMEFF1xwwQUXXHDBBRdccMEFF1xwwQUXXHDBBRdccMEFF1xwwQUXXHDBBRdccMFFO12ocwRGKQx1jtK5qMp4RS7zVUhiXMbt1DlKlOkY914IQ3N1jk6LptXs3+ocpRz4mzRRh4HnBE3/XHDBBRdccMEFF1xwwQUXXHDBBRdtdOF+JxdccMEFF1xwwQUXXHDBBRdccMEFF1xwwQUXXHDBBRdccMEFF1xwwQUXXHDBBRdccMEFF1xwwUU7XahzBEYpDHWO0rmoynhFLvNVSGJcxu3UOUqU6Rj3XghDc3WOnhRNq9m/1TlKOfA3aaIOA88Jmv654IILLrjgggsuuOCCCy644IILLtrowv1OLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCi3a6UOcIjFIY6hylc1GV8Ypc5quQxLiM26lzlCjTMe69EIbG6hwd7BVNq9m/1TlKOfA3aaIOA88Jmv654IILLrjgggsuuOCCCy644IILLtrowv1OLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCi3a6UOcIjFIY6hylc1GV8Ypc5quQxLiM26lzlCjTMe69EIbm6hztF02r2b/VOUo58Ddpog4Dzwma/rngggsuuOCCCy644IILLrjgggsu2ujC/U4uuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IKLdrpQ5wiMUhjqHKVzUZXxilzmq5DEuIzbqXOUKNMx7r0QhubqHB0UTavZv9U5SjnwN2miDgPPCZr+ueCCCy644IILLrjgggsuuOCCCy7a6ML9Ti644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjggot2ulDnCIxSGOocpXNRlfGKXOarkMS4jNupc5Qo0zHuvRCG5uocHRZNq9m/1TlKOfA3aaIOA88Jmv654IILLrjgggsuuOCCCy644IILLtrowv1OLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCi3a6UOcIjFIY6hylc1GV8Ypc5quQxLiM26lzlCjTMe69EIbm6hwdFU2r2b/VOUo58Ddpog4Dzwma/rngggsuuOCCCy644IILLrjgggsu2ujC/U4uuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IKLdrpQ5wiMUhjqHKVzUZXxilzmq5DEuIzbqXOUKNMx7r0QhubqHB0XTavZv9U5SjnwN2miDgPPCZr+ueCCCy644IILLrjgggsuuOCCCy7a6ML9Ti644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjggot2ulDnCIxSGOocpXNRlfGKXOarkMS4jNupc5Qo0zHuvRCG5uocnRRNq9m/1TlKOfA3aaIOA88Jmv654IILLrjgggsuuOCCCy644IILLtrowv1OLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCi3a6UOcIjFIY6hylc1GV8Ypc5quQxLiM26lzlCjTMe69EIbm6hw9LppWs3+rc5Ry4G/SRB0GnhM0/XPBBRdccMEFF1xwwQUXXHDBBRdctNGF+51ccMEFF1xwwQUXXHDBBRdccMEFF1xwwQUXXHDBBRdccMEFF1xwwQUXXHDBBRdccMEFF1xwwQUX7XShzhEYpTDUOUrnoirjFbnMVyGJcRm3U+coUaZj3HshDM3VOTotmlazf6tzlHLgb9JEHQaeEzT9c8EFF1xwwQUXXHDBBRdccMEFF1y00YX7nVxwwQUXXHDBBRdccMEFF1xwwQUXXHDBBRdccMEFF1xwwQUXXHDBBRdccMEFF1xwwQUXXHDBBRftdKHOERilMNQ5SueiKuMVucxXIYlxGbdT5yhRpmPceyEMzdU5elI0rWb/Vuco5cDfpIk6DDwnaPrnggsuuOCCCy644IILLrjgggsuuGijC/c7ueCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLtrpQp0jMEphqHOUzkVVxityma9CEuMybqfOUaJMx7j3Qhgaq3N0uFc0rWb/Vuco5cDfpIk6DDwnaPrnggsuuOCCCy644IILLrjgggsuuGijC/c7ueCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLrjgggsuuOCCCy644IILLtrpQp0jMEphqHOUzkVVxityma/Ca4veaPP2bPWRDR98PugvIsgM4PLA48GXi8+7lzFU08vnuf3JbDgYL846o+74fN7vTotE5iPbyenhaf7zi3yUe7J3stzrx93ZTvB31jk+KlJccMg2Ozwu9ri8XiwGs5j+F4Pu+d0vGfmzzuFJ8fPFZHK/VQAZ3ouf85Prqy9C4y+usoOfD/rDu7BcZCH6fDZZlAhYZF/ys+EsC8BwMl6+P5p90Qtvn0/6kU7smoOL7vVokbdhNBwPPh8u+i/umth/0Z09X1IOcpeR3c3bfP66+CE75vVVFsRn/wdQSwcInXOwXQsXAACm6ggAUEsBAhQAFAAICAgAdUA3XejQASPZAAAAPQIAAAsAAAAAAAAAAAAAAAAAAAAAAF9yZWxzLy5yZWxzUEsBAhQAFAAICAgAdUA3XYTR/6XhAQAAjQMAABEAAAAAAAAAAAAAAAAAEgEAAGRvY1Byb3BzL2NvcmUueG1sUEsBAhQAFAAICAgAdUA3Xd54ExYAAQAAowEAABAAAAAAAAAAAAAAAAAAMgMAAGRvY1Byb3BzL2FwcC54bWxQSwECFAAUAAgICAB1QDdddmSqbdQAAACXAgAAHAAAAAAAAAAAAAAAAABwBAAAd29yZC9fcmVscy9kb2N1bWVudC54bWwucmVsc1BLAQIUABQACAgIAHVAN11p6w7ZewMAAJUMAAAPAAAAAAAAAAAAAAAAAI4FAAB3b3JkL3N0eWxlcy54bWxQSwECFAAUAAgICAB1QDddrLTEjC4BAAA2BAAAEgAAAAAAAAAAAAAAAABGCQAAd29yZC9mb250VGFibGUueG1sUEsBAhQAFAAICAgAdUA3XVRSL135AAAAjQEAABEAAAAAAAAAAAAAAAAAtAoAAHdvcmQvc2V0dGluZ3MueG1sUEsBAhQAFAAICAgAdUA3Xfaw8YIeAgAA0QgAABUAAAAAAAAAAAAAAAAA7AsAAHdvcmQvdGhlbWUvdGhlbWUxLnhtbFBLAQIUABQACAgIAHVAN135yHNBYQEAANEFAAATAAAAAAAAAAAAAAAAAE0OAABbQ29udGVudF9UeXBlc10ueG1sUEsBAhQAFAAICAgAdUA3XZ1zsF0LFwAApuoIABEAAAAAAAAAAAAAAAAA7w8AAHdvcmQvZG9jdW1lbnQueG1sUEsFBgAAAAAKAAoAfwIAADknAAAAAA==";
+      const bin=Uint8Array.from(atob(templateB64),c=>c.charCodeAt(0));
+      // Cloudflare has no native DOCX editor, so patch the OpenXML package directly.
+      function crc32(bytes){
+        let c=0xffffffff;
+        for(const b of bytes){c^=b;for(let k=0;k<8;k++)c=(c>>>1)^((c&1)?0xedb88320:0)}
+        return (c^0xffffffff)>>>0;
+      }
+      function readU16(a,o){return a[o]|a[o+1]<<8} function readU32(a,o){return (a[o]|a[o+1]<<8|a[o+2]<<16|a[o+3]<<24)>>>0}
+      function u16(n){return [n&255,n>>>8&255]} function u32(n){return [n&255,n>>>8&255,n>>>16&255,n>>>24&255]}
+      async function unzipEntries(data){
+        let eocd=-1;for(let i=data.length-22;i>=Math.max(0,data.length-65557);i--)if(readU32(data,i)===0x06054b50){eocd=i;break}
+        if(eocd<0)throw new Error("DOCX: ZIP directory not found");
+        const count=readU16(data,eocd+10),cdOff=readU32(data,eocd+16),dec=new TextDecoder(),out=[];let p=cdOff;
+        for(let n=0;n<count;n++){
+          const method=readU16(data,p+10),cs=readU32(data,p+20),us=readU32(data,p+24),nl=readU16(data,p+28),el=readU16(data,p+30),cl=readU16(data,p+32),lo=readU32(data,p+42);
+          const name=dec.decode(data.slice(p+46,p+46+nl)),ln=readU16(data,lo+26),le=readU16(data,lo+28),st=lo+30+ln+le,comp=data.slice(st,st+cs);
+          let raw;
+          if(method===0)raw=comp;
+          else if(method===8)raw=new Uint8Array(await new Response(new Blob([comp]).stream().pipeThrough(new DecompressionStream("deflate-raw"))).arrayBuffer());
+          else throw new Error("DOCX: unsupported compression");
+          out.push({name,raw});p+=46+nl+el+cl;
+        }return out;
+      }
+      function zipEntries(entries){
+        const enc=new TextEncoder(),locals=[],centrals=[];let off=0;
+        for(const e of entries){
+          const nb=enc.encode(e.name),raw=e.raw,crc=crc32(raw);
+          const lh=new Uint8Array([...u32(0x04034b50),...u16(20),...u16(0),...u16(0),...u16(0),...u16(0),...u32(crc),...u32(raw.length),...u32(raw.length),...u16(nb.length),...u16(0),...nb]);
+          locals.push(lh,raw);
+          const ch=new Uint8Array([...u32(0x02014b50),...u16(20),...u16(20),...u16(0),...u16(0),...u16(0),...u16(0),...u32(crc),...u32(raw.length),...u32(raw.length),...u16(nb.length),...u16(0),...u16(0),...u16(0),...u16(0),...u32(0),...u32(off),...nb]);
+          centrals.push(ch);off+=lh.length+raw.length;
+        }
+        const cdOff=off,cdSize=centrals.reduce((a,x)=>a+x.length,0),end=new Uint8Array([...u32(0x06054b50),...u16(0),...u16(0),...u16(entries.length),...u16(entries.length),...u32(cdSize),...u32(cdOff),...u16(0)]);
+        const all=[...locals,...centrals,end],len=all.reduce((a,x)=>a+x.length,0),out=new Uint8Array(len);let q=0;for(const x of all){out.set(x,q);q+=x.length}return out;
+      }
+      const escX=(x)=>String(x??"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+      function setCellText(cellXml,text,smallSecond=false){
+        const tcPr=(cellXml.match(/<w:tcPr[\s\S]*?<\/w:tcPr>/)||[""])[0];
+        const parts=String(text).split("\n");
+        const paras=parts.map((v,i)=>`<w:p><w:pPr><w:jc w:val="${i?"left":"center"}"/></w:pPr><w:r><w:rPr><w:sz w:val="${i&&smallSecond?14:18}"/><w:szCs w:val="${i&&smallSecond?14:18}"/></w:rPr><w:t xml:space="preserve">${escX(v)}</w:t></w:r></w:p>`).join("");
+        return `<w:tc>${tcPr}${paras}</w:tc>`;
+      }
+      const entries=await unzipEntries(bin),enc=new TextEncoder(),dec=new TextDecoder();
+      const di=entries.findIndex(e=>e.name==="word/document.xml");if(di<0)throw new Error("DOCX template document.xml missing");
+      let xml=dec.decode(entries[di].raw);
 
-      const paid=profiles.filter(r=>Number(r.benefit)!==1&&Number(r.orphan)!==1).length;
-      const benefit=profiles.filter(r=>Number(r.benefit)===1&&Number(r.orphan)!==1).length;
-      const orphan=profiles.filter(r=>Number(r.orphan)===1).length;
+      // Keep the template's original table geometry; only replace text in its cells.
+      xml=xml.replace(/Табель учета рабочего времени/g,"Табель питания");
+      xml=xml.replace(/за __________________ 20___г\./g,`за ${monthRu} ${year} г.`);
+      xml=xml.replace(/группа №/g,"группа № 102");
+      xml=xml.replace(/Фамилия,инициалы/g,"Фамилия, имя / категория");
 
-      const html=`<!DOCTYPE html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" lang="ru">
-      <head><meta charset="utf-8"><title>Табель питания 102 группы</title>
-      <style>
-      @page Section1{size:841.9pt 595.3pt;mso-page-orientation:landscape;margin:24pt 22pt 24pt 22pt}
-      div.Section1{page:Section1}
-      body{font-family:"Times New Roman",serif;color:#000;font-size:9pt}
-      h1{text-align:center;font-size:16pt;margin:0 0 4pt;font-weight:700}
-      .sub{text-align:center;font-size:11pt;margin-bottom:10pt}
-      table{border-collapse:collapse;width:100%;table-layout:fixed}
-      th,td{border:1px solid #000;text-align:center;vertical-align:middle;padding:2pt 1pt;height:20pt}
-      th{font-weight:700;background:#eee}
-      .num{width:20pt}.person{width:130pt;text-align:left;padding-left:4pt}.person span{font-size:8pt;font-style:italic}
-      .day{width:18pt}.total{width:35pt;font-weight:700}
-      .summary{margin-top:10pt;font-size:10pt}
-      .sign{margin-top:24pt;width:100%}.sign td{border:0;text-align:left;height:auto;padding:4pt}
-      </style></head><body><div class="Section1">
-      <h1>ТАБЕЛЬ ПИТАНИЯ</h1>
-      <div class="sub">за ${monthRu} ${year} г. · группа № 102</div>
-      <table>
-        <thead><tr><th class="num">№</th><th class="person">Фамилия, имя<br><span>категория питания</span></th>${dayHead}<th class="total">Итого<br>дней</th></tr></thead>
-        <tbody>${rows||`<tr><td colspan="${daysInMonth+3}">Список питания пуст</td></tr>`}</tbody>
-      </table>
-      <div class="summary"><b>Всего:</b> платники — ${paid}; льготники — ${benefit}; сироты — ${orphan}; учеников — ${profiles.length}.</div>
-      <table class="sign"><tr><td>Ответственный __________________ / __________________</td><td style="text-align:right">Дата __________________</td></tr></table>
-      </div></body></html>`;
-
-      const filename=`tabel_pitaniya_102_${month}.doc`;
-      return new Response("\uFEFF"+html,{headers:{
-        "content-type":"application/msword; charset=UTF-8",
+      const tableMatch=xml.match(/<w:tbl[\s\S]*?<\/w:tbl>/);
+      if(!tableMatch)throw new Error("DOCX template table missing");
+      let table=tableMatch[0],rows=[...table.matchAll(/<w:tr[\s\S]*?<\/w:tr>/g)].map(m=>m[0]);
+      for(let ri=2;ri<rows.length;ri++){
+        const student=profiles[ri-2],cells=[...rows[ri].matchAll(/<w:tc[\s\S]*?<\/w:tc>/g)].map(m=>m[0]);
+        if(!cells.length)continue;
+        cells[0]=setCellText(cells[0],student?String(ri-1):"");
+        if(cells[1])cells[1]=setCellText(cells[1],student?student.name+"\n"+category(student):"",true);
+        const set=student?(byStudent[String(student.student_id)]||new Set()):new Set();
+        for(let day=1;day<=31;day++)if(cells[day+1])cells[day+1]=setCellText(cells[day+1],student&&day<=daysInMonth&&set.has(day)?"✓":"");
+        if(cells[33])cells[33]=setCellText(cells[33],student?String(set.size):"");
+        let nr=rows[ri];let ci=0;nr=nr.replace(/<w:tc[\s\S]*?<\/w:tc>/g,()=>cells[ci++]||"");rows[ri]=nr;
+      }
+      let rix=0;table=table.replace(/<w:tr[\s\S]*?<\/w:tr>/g,()=>rows[rix++]||"");
+      xml=xml.replace(tableMatch[0],table);
+      entries[di].raw=enc.encode(xml);
+      const result=zipEntries(entries);
+      const filename=`tabel_pitaniya_102_${month}.docx`;
+      return new Response(result,{headers:{
+        "content-type":"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "content-disposition":`attachment; filename="${filename}"`,
         "cache-control":"no-store"
       }});
