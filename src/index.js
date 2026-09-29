@@ -21225,7 +21225,7 @@ ${JSON.stringify(result)}`);
           notes: env.ANDROID_APK_URL
             ? "Журнал 102 2.2.2 — обновлён чат, исправлено положение кнопки над нижним меню, улучшены отправка сообщений и прокрутка."
             : "Текущая опубликованная версия Журнала 102.",
-          apkUrl: env.ANDROID_APK_URL || "https://github.com/dirli6425-cpu/teacher-journal-bot/releases/download/2.1.3/app-debug.apk"
+          apkUrl: env.ANDROID_APK_URL || "https://github.com/dirli6425-cpu/teacher-journal-bot/releases/download/2.2.2/app-debug.apk"
         });
       }
       if (request.method === "GET" && url.pathname === "/android/latest.apk") {
