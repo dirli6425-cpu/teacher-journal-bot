@@ -25964,6 +25964,30 @@ input:not([type=checkbox]):not([type=radio]),select,textarea{min-width:0;max-wid
 @media(max-width:700px){
  body.chat-open{overflow:hidden;height:100dvh}.chat-open #shell{height:100dvh;overflow:hidden}.chat-open .main{height:100dvh;overflow:hidden}.chat-open .topbar{flex:0 0 auto}.chat-open #content{height:calc(100dvh - 132px);overflow:hidden;padding:0 8px!important}.chat-open #content>.page-heading{display:none}.chat-open .chat-shell{height:100%;min-height:0;border-radius:16px 16px 0 0;margin:0}.chat-open .chat-messages{overscroll-behavior:contain;-webkit-overflow-scrolling:touch}.chat-open .chat-compose{padding-bottom:calc(8px + env(safe-area-inset-bottom))}.chat-jump{right:12px;bottom:70px}.chat-new-pill{bottom:72px}
 }
+
+.chat-shell{position:relative}
+.chat-emoji-panel button{appearance:none!important;-webkit-appearance:none!important;width:38px!important;height:38px!important;min-width:0!important;min-height:0!important;margin:0!important;padding:0!important;display:grid!important;place-items:center!important;border:0!important;background:transparent!important;box-shadow:none!important;color:inherit!important;line-height:1!important}
+.chat-emoji-panel button svg{display:none!important}
+.chat-emoji-panel button:hover{background:#31414c!important}
+@media(max-width:700px){
+ body.chat-open{overflow:hidden!important;height:100dvh!important}
+ .chat-open #shell{height:100dvh!important;min-height:0!important;overflow:hidden!important}
+ .chat-open .main{height:100dvh!important;min-height:0!important;overflow:hidden!important;display:flex!important;flex-direction:column!important}
+ .chat-open .topbar{flex:0 0 auto!important}
+ .chat-open #content{flex:1 1 auto!important;height:auto!important;min-height:0!important;overflow:hidden!important;padding:6px 8px 0!important}
+ .chat-open #content>.page-heading{display:none!important}
+ .chat-open .chat-shell{height:100%!important;min-height:0!important;margin:0!important;border-radius:16px 16px 0 0!important;overflow:hidden!important}
+ .chat-open .chat-head{flex:0 0 auto!important;padding:9px 12px!important}
+ .chat-open .chat-avatar{width:36px!important;height:36px!important;font-size:14px!important}
+ .chat-open .chat-messages{flex:1 1 0!important;min-height:0!important;overflow-y:auto!important;overflow-x:hidden!important;padding:12px 8px!important;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+ .chat-open .chat-compose{flex:0 0 auto!important;padding:7px 8px calc(7px + env(safe-area-inset-bottom))!important;gap:6px!important}
+ .chat-open .chat-compose textarea{min-height:42px!important;height:42px;max-height:96px!important;padding:10px 12px!important}
+ .chat-open .chat-emoji-btn,.chat-open .chat-send{width:42px!important;height:42px!important;min-width:42px!important}
+ .chat-open .chat-emoji-panel{left:0!important;bottom:50px!important;width:min(294px,calc(100vw - 28px))!important;grid-template-columns:repeat(7,38px)!important;justify-content:center!important;padding:8px!important;gap:2px!important}
+ .chat-open .chat-jump{right:12px!important;bottom:62px!important}
+ .chat-open .chat-new-pill{bottom:64px!important}
+}
+
 </style>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
@@ -26070,7 +26094,7 @@ async function go(p){
 }
 function polish(c){
  c.querySelectorAll('h2,h3').forEach(function(h){if(!h.children.length){var clean=h.textContent.replace(/^[^\\p{L}\\p{N}]+/u,'');if(clean!==h.textContent)h.textContent=clean}});
- c.querySelectorAll('button.btn,.metric-card>.muted.small,.perm-icon,.audit-emoji,.mealToggle>span:first-child,.ch-student>span:first-child,.lineupStudent>span:first-child').forEach(function(el){if(!el.children.length&&/^[^\\p{L}\\p{N}\\s]/u.test(el.textContent)){var t=el.textContent,clean=t.replace(/^[^\\p{L}\\p{N}]+/u,'');var name=t.includes('➖')||t.includes('▫️')?'none':t.includes('🔒')?'lock':t.includes('✅')?'check':t.includes('❌')?'absent':t.includes('🤒')?'health':t.includes('📝')?'reports':t.includes('◀')?'left':t.includes('▶')?'right':t.includes('➕')||t.startsWith('+')?'plus':t.includes('✏')?'edit':t.includes('⚙')?'settings':t.includes('📊')?'analytics':t.includes('🔎')?'search':t.includes('🎲')?'settings':'journal';el.innerHTML=icon(name)+(clean?'<span>'+esc(clean)+'</span>':'');if(!clean&&!el.hasAttribute('aria-label'))el.setAttribute('aria-label',name==='left'?'Предыдущий месяц':name==='right'?'Следующий месяц':'Сгенерировать пароль')}});
+ c.querySelectorAll('button.btn:not(.chat-send),.metric-card>.muted.small,.perm-icon,.audit-emoji,.mealToggle>span:first-child,.ch-student>span:first-child,.lineupStudent>span:first-child').forEach(function(el){if(!el.children.length&&/^[^\\p{L}\\p{N}\\s]/u.test(el.textContent)){var t=el.textContent,clean=t.replace(/^[^\\p{L}\\p{N}]+/u,'');var name=t.includes('➖')||t.includes('▫️')?'none':t.includes('🔒')?'lock':t.includes('✅')?'check':t.includes('❌')?'absent':t.includes('🤒')?'health':t.includes('📝')?'reports':t.includes('◀')?'left':t.includes('▶')?'right':t.includes('➕')||t.startsWith('+')?'plus':t.includes('✏')?'edit':t.includes('⚙')?'settings':t.includes('📊')?'analytics':t.includes('🔎')?'search':t.includes('🎲')?'settings':'journal';el.innerHTML=icon(name)+(clean?'<span>'+esc(clean)+'</span>':'');if(!clean&&!el.hasAttribute('aria-label'))el.setAttribute('aria-label',name==='left'?'Предыдущий месяц':name==='right'?'Следующий месяц':'Сгенерировать пароль')}});
  c.querySelectorAll('input:not([aria-label])').forEach(function(x){if(x.type==='date')x.setAttribute('aria-label','Дата');if(x.type==='month')x.setAttribute('aria-label','Месяц');if(x.placeholder)x.setAttribute('aria-label',x.placeholder)});
  c.querySelectorAll('.field>label:not([for])').forEach(function(l){var input=l.parentElement.querySelector('input[id],select[id],textarea[id]');if(input)l.setAttribute('for',input.id)});
  if(!can('edit_attendance'))c.querySelectorAll('.ch-student').forEach(function(x){x.disabled=true});
