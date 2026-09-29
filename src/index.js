@@ -21221,8 +21221,8 @@ ${JSON.stringify(result)}`);
           // Activate the new mandatory update only after a production APK, signed
           // with the existing application's key, has been uploaded to this URL.
           // Publish code 20 only after uploading the matching APK: set ANDROID_VERSION_CODE=20 and ANDROID_VERSION_NAME=2.2.3.
-          versionCode: 20,
-          versionName: "2.2.3",
+          versionCode: env.ANDROID_APK_URL ? (Number(env.ANDROID_VERSION_CODE) || 16) : 20,
+          versionName: env.ANDROID_APK_URL ? String(env.ANDROID_VERSION_NAME || "2.1.3") : "2.2.3",
           required: true,
           notes: env.ANDROID_APK_URL
             ? "Доступно обновление Журнала 102."
