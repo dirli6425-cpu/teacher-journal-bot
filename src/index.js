@@ -21199,9 +21199,19 @@ var index_default = {
     if(request.method==='GET'&&url.pathname==='/firebase-messaging-sw.js')return new Response(CHAT_PUSH_SW.replace('__PUSH_CONFIG__',JSON.stringify(PUSH_WEB_CONFIG)),{headers:{'content-type':'application/javascript; charset=utf-8','cache-control':'no-cache','service-worker-allowed':'/'}});
     if(request.method==='GET'&&url.pathname==='/push-icon.svg')return new Response('<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192"><rect width="192" height="192" rx="44" fill="#364558"/><path d="M44 42h104v80H88l-44 30z" fill="#e4e6eb"/><path d="M65 70h62M65 92h44" stroke="#364558" stroke-width="9"/></svg>',{headers:{'content-type':'image/svg+xml','cache-control':'public,max-age=86400'}});
     try {
-      await initDb(env);
-      await rememberWebOrigin(env, url.origin);
+      // IMPORTANT: do not run database migrations on every HTTP request.
+      // The old code executed dozens of CREATE/PRAGMA/UPDATE queries before
+      // even routing /api/me or /api/chat, which can exhaust Workers CPU.
+      if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/app")) {
+        // Origin persistence is not request-critical; keep it off the hot API path.
+        const remember = rememberWebOrigin(env, url.origin).catch(() => {});
+        if (ctx && ctx.waitUntil) ctx.waitUntil(remember);
+      }
       if (request.method === "GET" && url.pathname === "/setup") {
+        // Schema/bootstrap work is allowed only on the explicit setup route.
+        await initDb(env);
+        await initPushDb(env);
+        await rememberWebOrigin(env, url.origin);
         const webhookUrl = `${url.origin}/webhook`;
         const result = await telegram(env, "setWebhook", {
           url: webhookUrl,
@@ -25816,12 +25826,22 @@ var PUSH_PROJECT = "journal102";
 var PUSH_WEB_CONFIG = {apiKey:"AIzaSyBiJWvKNMuUIHXgS4ZHoe8TRI-3Hk14EPM",authDomain:"journal102.firebaseapp.com",projectId:"journal102",storageBucket:"journal102.firebasestorage.app",messagingSenderId:"52462064879",appId:"1:52462064879:web:db80e6a0f22f4573b7f71a"};
 var PUSH_VAPID = "BD8k3GSEdVzc8zB-d40haWnACdknQX9sHzT_NrdjZd_qZ_KrWaRWjNmFbREKNRlzRH-kLtZbmF8CSC6Uc2b0-Mw";
 var pushOAuthCache = null;
+var chatDbInitPromise = null;
+async function ensureChatDb(env) {
+  if (chatDbInitPromise) return chatDbInitPromise;
+  chatDbInitPromise = env.DB.prepare(`CREATE TABLE IF NOT EXISTS web_chat_messages(id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER NOT NULL,author TEXT NOT NULL,message TEXT NOT NULL,created_at TEXT NOT NULL)`).run()
+    .catch((error) => { chatDbInitPromise = null; throw error; });
+  return chatDbInitPromise;
+}
+var pushDbInitPromise = null;
 async function initPushDb(env) {
-  await env.DB.batch([
+  if (pushDbInitPromise) return pushDbInitPromise;
+  pushDbInitPromise = env.DB.batch([
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS web_chat_messages(id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER NOT NULL,author TEXT NOT NULL,message TEXT NOT NULL,created_at TEXT NOT NULL)`),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS chat_push_devices(token TEXT PRIMARY KEY, account_id INTEGER NOT NULL, session_id TEXT NOT NULL, platform TEXT NOT NULL, updated_at INTEGER NOT NULL)`),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS chat_push_outbox(message_id INTEGER NOT NULL,token TEXT NOT NULL,account_id INTEGER NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,next_at INTEGER NOT NULL,created_at INTEGER NOT NULL,PRIMARY KEY(message_id,token))`)
-  ]);
+  ]).catch((error) => { pushDbInitPromise = null; throw error; });
+  return pushDbInitPromise;
 }
 function pushCredentials(env) {
   if (!env.FCM_SERVICE_ACCOUNT_JSON) return null;
@@ -26293,7 +26313,7 @@ async function chatWatchPulse(){
    }
  }catch(_){}
 }
-function startChatWatch(){if(state.chatWatch)clearInterval(state.chatWatch);chatWatchPulse();state.chatWatch=setInterval(chatWatchPulse,5000)}
+function startChatWatch(){if(state.chatWatch)clearInterval(state.chatWatch);chatWatchPulse();state.chatWatch=setInterval(chatWatchPulse,10000)}
 function localToday(){var parts=new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Chisinau',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());var p={};parts.forEach(function(x){p[x.type]=x.value});return p.year+'-'+p.month+'-'+p.day}
 function dateControls(id){return '<div class="date-controls"><button class="btn ghost icon-btn" id="prevDate" aria-label="Предыдущий день">'+icon('left')+'</button><input type="date" id="'+id+'" aria-label="Дата журнала" value="'+state.date+'"><button class="btn ghost icon-btn" id="nextDate" aria-label="Следующий день">'+icon('right')+'</button><button class="btn secondary today-btn" id="todayDate">Сегодня</button></div>'}
 function bindDates(id,page){document.getElementById(id).onchange=function(){if(this.value){state.date=this.value;go(page)}};[-1,1].forEach(function(dir){document.getElementById(dir<0?'prevDate':'nextDate').onclick=function(){var dt=new Date(state.date+'T12:00:00Z');dt.setUTCDate(dt.getUTCDate()+dir);state.date=dt.toISOString().slice(0,10);go(page)}});document.getElementById('todayDate').onclick=function(){state.date=localToday();go(page)}}
@@ -26787,7 +26807,7 @@ pages.chat=async function(c){
  notify.onclick=function(){if(journalPush.enabled)disableChatPush();else enableChatPush(true)};
  function cleanup(){if(disposed)return;disposed=true;if(journalPush.onChange===notifState)journalPush.onChange=null;clearInterval(timer);sizeObserver.disconnect();window.removeEventListener('resize',fitChat);if(window.visualViewport)window.visualViewport.removeEventListener('resize',fitChat);obs.disconnect();if(!document.querySelector('#content .chat-shell')){document.body.classList.remove('chat-open','chat-typing');document.body.style.removeProperty('--chat-viewport');document.body.style.removeProperty('--chat-nav-height')}}
  var obs=new MutationObserver(function(){if(!c.isConnected)cleanup()});obs.observe(document.body,{childList:true,subtree:true});
- await load();if(active())timer=setInterval(load,3000);else cleanup();
+ await load();if(active())timer=setInterval(load,5000);else cleanup();
 };
 pages.online=async function(c){
  var loading=false;
@@ -27070,7 +27090,7 @@ async function presencePulse(){
  try{await api('/api/me',{cache:'no-store',signal:presenceRequest.signal})}catch(e){}finally{clearTimeout(timeout);presenceBusy=false;presenceRequest=null}
  if(!document.hidden&&state.me&&state.page==='online'&&state.refreshPresence)await state.refreshPresence();
 }
-setInterval(presencePulse,30000);
+setInterval(presencePulse,60000);
 document.addEventListener('visibilitychange',function(){if(document.hidden){if(presenceRequest)presenceRequest.abort()}else presencePulse()});
 
 async function boot(){
@@ -28407,13 +28427,7 @@ async function handleWebApi(request, env, url, ctx) {
     }
 
     if (path === "/api/chat" && request.method === "GET") {
-      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS web_chat_messages(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        account_id INTEGER NOT NULL,
-        author TEXT NOT NULL,
-        message TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      )`).run();
+      await ensureChatDb(env);
       const after=Math.max(0,Number(url.searchParams.get("after")||0)||0);
       const rows=(await env.DB.prepare(`SELECT id,account_id,author,message,created_at FROM web_chat_messages
         WHERE id>? ORDER BY id DESC LIMIT 120`).bind(after).all()).results||[];
@@ -28422,13 +28436,7 @@ async function handleWebApi(request, env, url, ctx) {
         time_text:new Date(r.created_at).toLocaleString("ru-RU",{timeZone:"Europe/Chisinau",day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}))});
     }
     if (path === "/api/chat" && request.method === "POST") {
-      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS web_chat_messages(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        account_id INTEGER NOT NULL,
-        author TEXT NOT NULL,
-        message TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      )`).run();
+      await ensureChatDb(env);
       const message=String(body.message||"").trim().slice(0,1500);
       if(!message)return jsonResponse({error:"Пустое сообщение"},400);
       const author=String(user.display_name||user.login||"Пользователь").slice(0,100),now=new Date().toISOString();
