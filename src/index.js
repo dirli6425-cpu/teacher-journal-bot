@@ -26595,7 +26595,7 @@ pages.chat=async function(c){
  function render(rows,append){
    if(!append){box.innerHTML='';lastDay=''}
    if(!rows.length&&!append){box.innerHTML='<div class="chat-empty"><b>Здесь пока тихо</b><div style="margin-top:6px">Напиши первое сообщение 👋</div></div>';return}
-   rows.forEach(function(m){var day=dayLabel(m.created_at);if(day!==lastDay){var sep=document.createElement('div');sep.className='chat-day';sep.textContent=day;box.appendChild(sep);lastDay=day}var row=document.createElement('div');row.className='chat-row '+(Number(m.mine)?'mine':'other');var av=Number(m.mine)?'':('<div class="chat-mini-avatar">'+esc(initials(m.author||'?'))+'</div>');row.innerHTML=av+'<article class="chat-msg">'+(Number(m.mine)?'':'<div class="chat-author">'+esc(m.author||'Пользователь')+'</div>')+'<div class="chat-text">'+esc(m.message)+'</div><div class="chat-time">'+esc(m.time_text||'')+'</div></article>';box.appendChild(row);lastId=Math.max(lastId,Number(m.id)||0)}
+   rows.forEach(function(m){var day=dayLabel(m.created_at);if(day!==lastDay){var sep=document.createElement('div');sep.className='chat-day';sep.textContent=day;box.appendChild(sep);lastDay=day}var row=document.createElement('div');row.className='chat-row '+(Number(m.mine)?'mine':'other');var av=Number(m.mine)?'':('<div class="chat-mini-avatar">'+esc(initials(m.author||'?'))+'</div>');row.innerHTML=av+'<article class="chat-msg">'+(Number(m.mine)?'':'<div class="chat-author">'+esc(m.author||'Пользователь')+'</div>')+'<div class="chat-text">'+esc(m.message)+'</div><div class="chat-time">'+esc(m.time_text||'')+'</div></article>';box.appendChild(row);lastId=Math.max(lastId,Number(m.id)||0);});
  }
  async function load(){
    if(loading||!c.isConnected||state.page!=='chat')return;loading=true;
