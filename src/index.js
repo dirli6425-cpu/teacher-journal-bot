@@ -25953,7 +25953,8 @@ input:not([type=checkbox]):not([type=radio]),select,textarea{min-width:0;max-wid
 .chat-day{text-align:center;font-size:12px;color:var(--muted);margin:6px 0}
 .chat-msg{max-width:min(78%,620px);align-self:flex-start;background:var(--surface-2,#eef2f5);border:1px solid var(--line);border-radius:16px 16px 16px 5px;padding:9px 12px;box-shadow:0 2px 8px rgba(25,43,55,.04)}
 .chat-msg.mine{align-self:flex-end;background:rgba(57,102,132,.13);border-radius:16px 16px 5px 16px}
-.chat-author{font-size:12px;font-weight:800;color:var(--accent,#35647f);margin-bottom:3px}.chat-text{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.42}.chat-time{font-size:10px;color:var(--muted);text-align:right;margin-top:4px}
+.chat-author{font-size:14px;font-weight:800;color:#7f9fba;margin-bottom:5px}.chat-text{font-size:17px;font-weight:500;color:#e7edf2;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.48}.chat-time{font-size:12px;color:#9eabb5;text-align:right;margin-top:6px}
+.chat-msg:not(.mine){background:#252b31;border-color:#39434b}.chat-msg.mine{background:#304254;border-color:#48647b}.chat-msg.mine .chat-author{color:#b8cee0}.chat-msg.mine .chat-text{color:#f2f6f8}.chat-msg.mine .chat-time{color:#b6c2cb}
 .chat-compose{display:flex;align-items:flex-end;gap:9px;padding:12px;border-top:1px solid var(--line);background:var(--surface,#fff)}
 .chat-compose textarea{min-height:44px;max-height:120px;resize:none;flex:1;border-radius:14px;padding:11px 13px}.chat-compose button{height:44px;min-width:48px}
 .chat-empty{text-align:center;margin:auto;color:var(--muted);padding:30px}.chat-unread{display:inline-flex;min-width:18px;height:18px;padding:0 5px;align-items:center;justify-content:center;border-radius:10px;background:#b44;color:white;font-size:11px;font-weight:800;margin-left:auto}
@@ -26041,7 +26042,7 @@ function canPage(page){if(['users','audit','settings','online'].includes(page))r
 function renderNav(){
  var groups=[['Основное',['dashboard','journal','pairs','students']],['Учебный процесс',['lineup','classhour','meals','calendar','health','duty','schedule']],['Обзоры',['parents','analytics','reports']],['Общение',['chat']],['Управление',['online','users','audit','settings']]];
  document.getElementById('sideNav').innerHTML=groups.map(function(g){var items=nav.filter(function(n){return g[1].includes(n[0])&&canPage(n[0])});if(!items.length)return '';return '<div class="nav-label">'+g[0]+'</div>'+items.map(function(n){return '<button class="navbtn '+(state.page===n[0]?'on':'')+'" data-p="'+n[0]+'" '+(state.page===n[0]?'aria-current="page"':'')+'>'+icon(n[0])+'<span>'+n[2]+'</span></button>'}).join('')}).join('');
- var labels={dashboard:'Главная',journal:'Журнал',pairs:'Пары',students:'Ученики'};
+ var labels={dashboard:'Главная',journal:'Журнал',pairs:'Пары',chat:'Чат'};
  var mobile=nav.filter(function(n){return labels[n[0]]&&canPage(n[0])}).map(function(n){return '<button data-p="'+n[0]+'" class="'+(state.page===n[0]?'on':'')+'" '+(state.page===n[0]?'aria-current="page"':'')+'>'+icon(n[0])+'<span>'+labels[n[0]]+'</span></button>'}).join('');
  mobile+='<button id="mobileMore" class="'+(!labels[state.page]?'on':'')+'" aria-label="Все разделы">'+icon('more')+'<span>Ещё</span></button>';
  document.getElementById('mobileNav').innerHTML=mobile;
