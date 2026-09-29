@@ -25962,21 +25962,57 @@ input:not([type=checkbox]):not([type=radio]),select,textarea{min-width:0;max-wid
 
 .chat-tools{display:flex;align-items:flex-end;gap:7px;position:relative}.chat-emoji-btn{width:44px;height:44px;border:0;border-radius:50%;background:transparent;color:#aab9c3;font-size:23px;cursor:pointer}.chat-emoji-btn:hover{background:#2b3942}.chat-emoji-panel{position:absolute;left:0;bottom:54px;width:min(310px,82vw);padding:10px;background:#202b32;border:1px solid #3b4b56;border-radius:16px;box-shadow:0 16px 42px rgba(0,0,0,.38);display:grid;grid-template-columns:repeat(7,1fr);gap:3px;z-index:20}.chat-emoji-panel.hidden{display:none}.chat-emoji-panel button{border:0;background:transparent;border-radius:9px;font-size:22px;padding:5px;cursor:pointer}.chat-emoji-panel button:hover{background:#31414c}.chat-jump{position:absolute;right:18px;bottom:76px;width:42px;height:42px;border-radius:50%;border:1px solid #476071;background:#263945;color:#eaf2f6;box-shadow:0 5px 18px rgba(0,0,0,.28);z-index:10;font-size:20px;display:grid;place-items:center}.chat-jump.hidden{display:none}.chat-new-pill{position:absolute;left:50%;transform:translateX(-50%);bottom:78px;background:#35546a;color:#f3f7f9;border:1px solid #50738b;border-radius:999px;padding:6px 11px;font-size:12px;font-weight:800;z-index:10;box-shadow:0 5px 18px rgba(0,0,0,.22)}.chat-new-pill.hidden{display:none}.chat-send svg{width:22px;height:22px;fill:currentColor}.chat-send{color:#f7fbfd!important}
 @media(max-width:700px){
- body.chat-open{overflow:hidden;height:100dvh}
- body.chat-open .main{height:100dvh;min-height:0;overflow:hidden}
- body.chat-open .topbar{position:fixed;top:0;left:0;right:0;height:66px;min-height:66px;box-sizing:border-box;z-index:31}
- body.chat-open #content{position:fixed!important;left:0;right:0;top:66px;bottom:calc(71px + env(safe-area-inset-bottom));height:auto!important;min-height:0;overflow:hidden;padding:6px 8px 0!important;margin:0!important;max-width:none!important}
- body.chat-open #content>.page-heading{display:none}
- body.chat-open .chat-shell{height:100%!important;min-height:0!important;border-radius:16px 16px 0 0;margin:0;padding:0}
- body.chat-open .chat-head{flex:0 0 auto}
- body.chat-open .chat-messages{min-height:0;flex:1 1 auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
- body.chat-open .chat-compose{flex:0 0 auto;padding:8px 8px 9px}
- body.chat-open .chat-compose textarea{min-width:0}
- body.chat-open .chat-tools{flex:0 0 auto}
- body.chat-open .chat-send{flex:0 0 46px}
- .chat-jump{right:12px;bottom:70px}
- .chat-new-pill{bottom:72px}
+ body.chat-open{overflow:hidden;height:100dvh}.chat-open #shell{height:100dvh;overflow:hidden}.chat-open .main{height:100dvh;overflow:hidden}.chat-open .topbar{flex:0 0 auto}.chat-open #content{height:calc(100dvh - 132px);overflow:hidden;padding:0 8px!important}.chat-open #content>.page-heading{display:none}.chat-open .chat-shell{height:100%;min-height:0;border-radius:16px 16px 0 0;margin:0}.chat-open .chat-messages{overscroll-behavior:contain;-webkit-overflow-scrolling:touch}.chat-open .chat-compose{padding-bottom:calc(8px + env(safe-area-inset-bottom))}.chat-jump{right:12px;bottom:70px}.chat-new-pill{bottom:72px}
 }
+
+/* Chat mobile layout v3: keep composer visible and let only messages scroll. */
+@media(max-width:760px){
+  body.chat-open{height:100dvh;overflow:hidden}
+  body.chat-open #shell{height:100dvh;min-height:0;overflow:hidden}
+  body.chat-open .main{
+    height:calc(100dvh - 75px - env(safe-area-inset-bottom));
+    min-height:0;display:flex;flex-direction:column;overflow:hidden
+  }
+  body.chat-open.chat-typing .main{height:100dvh}
+  body.chat-open.chat-typing .mobile-nav{display:none}
+  body.chat-open .topbar{position:relative;top:auto;flex:0 0 auto}
+  body.chat-open #content{
+    flex:1;min-height:0;height:auto!important;overflow:hidden;
+    max-width:none;margin:0;padding:0 8px!important
+  }
+  body.chat-open #content>.page-heading{display:none}
+  body.chat-open .chat-shell{
+    height:100%;min-height:0;margin:0;border-radius:16px 16px 0 0;
+    display:flex;flex-direction:column;overflow:hidden
+  }
+  body.chat-open .chat-head{flex:0 0 auto}
+  body.chat-open .chat-messages{
+    flex:1 1 auto;min-height:0;overflow-y:auto;
+    overscroll-behavior:contain;-webkit-overflow-scrolling:touch;
+    padding:12px 8px
+  }
+  body.chat-open .chat-compose{
+    flex:0 0 auto;position:relative;z-index:12;
+    padding:8px 8px max(9px,env(safe-area-inset-bottom));
+    gap:7px;background:#1b252c
+  }
+  body.chat-open .chat-tools{flex:0 0 auto}
+  body.chat-open .chat-compose textarea{
+    min-width:0;min-height:44px;max-height:112px;
+    padding:11px 13px!important
+  }
+  body.chat-open .chat-send{width:44px!important;min-width:44px!important;height:44px!important}
+  body.chat-open .chat-emoji-btn{width:42px;height:44px}
+  body.chat-open .chat-emoji-panel{
+    left:0;bottom:52px;width:min(286px,calc(100vw - 40px));
+    grid-template-columns:repeat(6,minmax(0,1fr));gap:4px;padding:9px;
+    border-radius:15px
+  }
+  body.chat-open .chat-emoji-panel button{font-size:21px;padding:6px 2px;min-height:36px}
+  body.chat-open .chat-jump{right:12px;bottom:68px}
+  body.chat-open .chat-new-pill{bottom:70px}
+}
+
 </style>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
@@ -26019,7 +26055,7 @@ function esc(x){return String(x==null?'':x).replace(/[&<>"']/g,function(c){retur
 async function api(path,opt){opt=opt||{};opt.headers=Object.assign({'content-type':'application/json'},opt.headers||{});var r=await fetch(path,opt);var ct=r.headers.get('content-type')||'';if(r.status===401){showAuth();throw new Error('Нужен вход')}if(!r.ok){var e=ct.includes('json')?await r.json():{error:await r.text()};throw new Error(e.error||'Ошибка')}return ct.includes('json')?r.json():r}
 function toast(t){document.querySelectorAll('.toast').forEach(function(x){x.remove()});var d=document.createElement('div');d.className='toast';d.setAttribute('role','status');d.textContent=t;document.body.appendChild(d);setTimeout(function(){d.remove()},2200)}
 function fmtDate(d){try{return new Date(d+'T12:00:00').toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'})}catch(e){return d}}
-function showAuth(){state.me=null;if(state.chatWatch){clearInterval(state.chatWatch);state.chatWatch=null}state.refreshPresence=null;document.getElementById('auth').classList.remove('hidden');document.getElementById('shell').classList.add('hidden')}
+function showAuth(){state.me=null;document.body.classList.remove('chat-open','chat-typing');if(state.chatWatch){clearInterval(state.chatWatch);state.chatWatch=null}state.refreshPresence=null;document.getElementById('auth').classList.remove('hidden');document.getElementById('shell').classList.add('hidden')}
 function showShell(){document.getElementById('auth').classList.add('hidden');document.getElementById('shell').classList.remove('hidden');renderNav();go('dashboard');presencePulse();startChatWatch()}
 var iconPaths={
  dashboard:'<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/>',
@@ -26598,6 +26634,7 @@ pages.chat=async function(c){
  '<div class="chat-messages" id="chatMessages"><div class="chat-empty">Загружаем сообщения…</div></div><button class="chat-new-pill hidden" id="chatNew">Новые сообщения</button><button class="chat-jump hidden" id="chatJump" aria-label="Вниз">↓</button>'+
  '<form class="chat-compose" id="chatForm"><div class="chat-tools"><button class="chat-emoji-btn" id="emojiBtn" type="button" aria-label="Смайлики">☺</button><div class="chat-emoji-panel hidden" id="emojiPanel">'+emojis.map(function(x){return'<button type="button">'+x+'</button>'}).join('')+'</div></div><textarea id="chatInput" maxlength="1500" rows="1" placeholder="Сообщение" aria-label="Сообщение"></textarea><button class="btn chat-send" type="submit" aria-label="Отправить">'+sendSvg+'</button></form></section>';
  var box=c.querySelector('#chatMessages'),input=c.querySelector('#chatInput'),status=c.querySelector('#chatStatus'),notify=c.querySelector('#chatNotify'),jump=c.querySelector('#chatJump'),newBtn=c.querySelector('#chatNew'),emojiPanel=c.querySelector('#emojiPanel');
+ input.addEventListener('focus',function(){document.body.classList.add('chat-typing')});input.addEventListener('blur',function(){document.body.classList.remove('chat-typing')});
  function nearBottom(){return box.scrollHeight-box.scrollTop-box.clientHeight<140}
  function syncScrollTools(){var near=nearBottom();jump.classList.toggle('hidden',near);if(near){newAway=0;newBtn.classList.add('hidden')}}
  box.onscroll=syncScrollTools;jump.onclick=function(){box.scrollTo({top:box.scrollHeight,behavior:'smooth'})};newBtn.onclick=jump.onclick;
@@ -26620,7 +26657,7 @@ pages.chat=async function(c){
  input.onkeydown=function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();c.querySelector('#chatForm').requestSubmit()}};
  notify.onclick=async function(){if(!('Notification'in window))return;var p=await Notification.requestPermission();notifState();toast(p==='granted'?'Уведомления включены 🔔':'Браузер не разрешил уведомления')};
  await load();timer=setInterval(load,3000);
- var obs=new MutationObserver(function(){if(!c.isConnected){document.body.classList.remove('chat-open');clearInterval(timer);obs.disconnect()}});obs.observe(document.body,{childList:true,subtree:true});
+ var obs=new MutationObserver(function(){if(!c.isConnected){document.body.classList.remove('chat-open','chat-typing');clearInterval(timer);obs.disconnect()}});obs.observe(document.body,{childList:true,subtree:true});
 };
 pages.online=async function(c){
  var loading=false;
