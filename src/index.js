@@ -21219,7 +21219,7 @@ ${JSON.stringify(result)}`);
           // Activate the new mandatory update only after a production APK, signed
           // with the existing application's key, has been uploaded to this URL.
           // The fallback URL still contains 2.1.3; advertise 2.2.2 only with a configured APK URL.
-          versionCode: env.ANDROID_APK_URL ? (Number(env.ANDROID_VERSION_CODE) || 20) : 16,
+          versionCode: env.ANDROID_APK_URL ? (Number(env.ANDROID_VERSION_CODE) || 19) : 16,
           versionName: env.ANDROID_APK_URL ? String(env.ANDROID_VERSION_NAME || "2.2.2") : "2.1.3",
           required: true,
           notes: env.ANDROID_APK_URL
