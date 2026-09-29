@@ -21194,8 +21194,10 @@ var DEFAULT_STUDENTS = [
   "\u0427\u0435\u0431\u043E\u0442\u0430\u0440\u044C \u0411\u043E\u0433\u0434\u0430\u043D"
 ];
 var index_default = {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    if(request.method==='GET'&&url.pathname==='/firebase-messaging-sw.js')return new Response(CHAT_PUSH_SW.replace('__PUSH_CONFIG__',JSON.stringify(PUSH_WEB_CONFIG)),{headers:{'content-type':'application/javascript; charset=utf-8','cache-control':'no-cache','service-worker-allowed':'/'}});
+    if(request.method==='GET'&&url.pathname==='/push-icon.svg')return new Response('<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192"><rect width="192" height="192" rx="44" fill="#364558"/><path d="M44 42h104v80H88l-44 30z" fill="#e4e6eb"/><path d="M65 70h62M65 92h44" stroke="#364558" stroke-width="9"/></svg>',{headers:{'content-type':'image/svg+xml','cache-control':'public,max-age=86400'}});
     try {
       await initDb(env);
       await rememberWebOrigin(env, url.origin);
@@ -21218,14 +21220,14 @@ ${JSON.stringify(result)}`);
         return jsonResponse({
           // Activate the new mandatory update only after a production APK, signed
           // with the existing application's key, has been uploaded to this URL.
-          // The fallback URL still contains 2.1.3; advertise 2.2.2 only with a configured APK URL.
+          // Publish code 20 only after uploading the matching APK: set ANDROID_VERSION_CODE=20 and ANDROID_VERSION_NAME=2.2.3.
           versionCode: env.ANDROID_APK_URL ? (Number(env.ANDROID_VERSION_CODE) || 19) : 16,
           versionName: env.ANDROID_APK_URL ? String(env.ANDROID_VERSION_NAME || "2.2.2") : "2.1.3",
           required: true,
           notes: env.ANDROID_APK_URL
-            ? "Журнал 102 2.2.2 — обновлён чат, исправлено положение кнопки над нижним меню, улучшены отправка сообщений и прокрутка."
+            ? "Доступно обновление Журнала 102."
             : "Текущая опубликованная версия Журнала 102.",
-          apkUrl: env.ANDROID_APK_URL || "https://github.com/dirli6425-cpu/teacher-journal-bot/releases/download/2.2.2/app-debug.apk"
+          apkUrl: env.ANDROID_APK_URL || "https://github.com/dirli6425-cpu/teacher-journal-bot/releases/download/2.1.3/app-debug.apk"
         });
       }
       if (request.method === "GET" && url.pathname === "/android/latest.apk") {
@@ -21241,7 +21243,7 @@ ${JSON.stringify(result)}`);
         });
       }
       if (url.pathname.startsWith("/api/")) {
-        return await handleWebApi(request, env, url);
+        return await handleWebApi(request, env, url, ctx);
       }
       if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/app")) {
         return new Response(WEB_APP_HTML, {
@@ -21262,7 +21264,8 @@ ${JSON.stringify(result)}`);
       }
       return textResponse("Worker error", 500);
     }
-  }
+  },
+  async scheduled(event,env,ctx){ctx.waitUntil(dispatchChatPush(env).catch(()=>console.warn("chat_push_scheduled_retry")));}
 };
 function textResponse(text, status = 200) {
   return new Response(text, {
@@ -25807,14 +25810,106 @@ handleExtraCallback = /* @__PURE__ */ __name(async function(data, env, chatId, m
     userId
   );
 }, "handleExtraCallback");
-// Journal 102 — Calm design 2.2.2; Android source versionCode 19.
+// Journal 102 — Calm design 2.2.3; Android source versionCode 20.
+// Firebase credentials are read only from a Cloudflare secret, never sent to clients.
+var PUSH_PROJECT = "journal102";
+var PUSH_WEB_CONFIG = {apiKey:"AIzaSyBiJWvKNMuUIHXgS4ZHoe8TRI-3Hk14EPM",authDomain:"journal102.firebaseapp.com",projectId:"journal102",storageBucket:"journal102.firebasestorage.app",messagingSenderId:"52462064879",appId:"1:52462064879:web:db80e6a0f22f4573b7f71a"};
+var PUSH_VAPID = "BD8k3GSEdVzc8zB-d40haWnACdknQX9sHzT_NrdjZd_qZ_KrWaRWjNmFbREKNRlzRH-kLtZbmF8CSC6Uc2b0-Mw";
+var pushOAuthCache = null;
+async function initPushDb(env) {
+  await env.DB.batch([
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS web_chat_messages(id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER NOT NULL,author TEXT NOT NULL,message TEXT NOT NULL,created_at TEXT NOT NULL)`),
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS chat_push_devices(token TEXT PRIMARY KEY, account_id INTEGER NOT NULL, session_id TEXT NOT NULL, platform TEXT NOT NULL, updated_at INTEGER NOT NULL)`),
+    env.DB.prepare(`CREATE TABLE IF NOT EXISTS chat_push_outbox(message_id INTEGER NOT NULL,token TEXT NOT NULL,account_id INTEGER NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,next_at INTEGER NOT NULL,created_at INTEGER NOT NULL,PRIMARY KEY(message_id,token))`)
+  ]);
+}
+function pushCredentials(env) {
+  if (!env.FCM_SERVICE_ACCOUNT_JSON) return null;
+  const c=JSON.parse(env.FCM_SERVICE_ACCOUNT_JSON);
+  if(c.project_id!==PUSH_PROJECT||!c.client_email||!c.private_key)throw new Error("Invalid FCM service account configuration");
+  return c;
+}
+function pushB64(bytes){let s="";for(const b of bytes)s+=String.fromCharCode(b);return btoa(s).replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_");}
+async function pushAccessToken(env) {
+  const c=pushCredentials(env);if(!c)throw new Error("FCM_NOT_CONFIGURED");
+  const now=Math.floor(Date.now()/1000);
+  if(pushOAuthCache&&pushOAuthCache.email===c.client_email&&pushOAuthCache.expires>now+60)return pushOAuthCache.token;
+  const enc=x=>pushB64(new TextEncoder().encode(JSON.stringify(x)));
+  const input=enc({alg:"RS256",typ:"JWT"})+"."+enc({iss:c.client_email,scope:"https://www.googleapis.com/auth/firebase.messaging",aud:"https://oauth2.googleapis.com/token",iat:now,exp:now+3600});
+  const der=Uint8Array.from(atob(c.private_key.replace(/-----[^-]+-----/g,"").replace(/\s/g,"")),x=>x.charCodeAt(0));
+  const key=await crypto.subtle.importKey("pkcs8",der,{name:"RSASSA-PKCS1-v1_5",hash:"SHA-256"},false,["sign"]);
+  const sig=await crypto.subtle.sign("RSASSA-PKCS1-v1_5",key,new TextEncoder().encode(input));
+  const r=await fetch("https://oauth2.googleapis.com/token",{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},body:new URLSearchParams({grant_type:"urn:ietf:params:oauth:grant-type:jwt-bearer",assertion:input+"."+pushB64(new Uint8Array(sig))}),signal:AbortSignal.timeout(10000)});
+  const d=await r.json();if(!r.ok||!d.access_token)throw new Error("FCM_OAUTH_"+r.status);
+  pushOAuthCache={email:c.client_email,token:d.access_token,expires:now+Number(d.expires_in||3600)};return d.access_token;
+}
+async function enqueueChatPush(env,messageId,authorId){
+  await initPushDb(env);
+  const now=Date.now();
+  await env.DB.prepare(`INSERT OR IGNORE INTO chat_push_outbox(message_id,token,account_id,next_at,created_at)
+    SELECT ?,d.token,d.account_id,?,? FROM chat_push_devices d
+    JOIN web_accounts a ON a.id=d.account_id AND a.enabled=1
+    JOIN web_sessions s ON s.session_id=d.session_id AND s.account_id=d.account_id
+    WHERE d.account_id<>? AND s.expires_at>?`).bind(messageId,now,now,authorId,new Date(now).toISOString()).run();
+  await dispatchChatPush(env);
+}
+async function dispatchChatPush(env){
+  if(!env.FCM_SERVICE_ACCOUNT_JSON)return;
+  await initPushDb(env);
+  const now=Date.now();
+  await env.DB.prepare(`DELETE FROM chat_push_outbox WHERE created_at<? OR attempts>=6`).bind(now-86400000).run();
+  const jobs=(await env.DB.prepare(`SELECT q.*,d.platform,d.session_id,a.role,a.permissions_json,m.author,m.message
+    FROM chat_push_outbox q JOIN chat_push_devices d ON d.token=q.token AND d.account_id=q.account_id
+    JOIN web_accounts a ON a.id=q.account_id AND a.enabled=1
+    JOIN web_sessions s ON s.session_id=d.session_id AND s.account_id=d.account_id AND s.expires_at>?
+    JOIN web_chat_messages m ON m.id=q.message_id AND m.account_id<>q.account_id
+    WHERE q.next_at<=? ORDER BY q.message_id LIMIT 8`).bind(new Date(now).toISOString(),now).all()).results||[];
+  if(!jobs.length)return;
+  const bearer=await pushAccessToken(env);
+  for(let i=0;i<jobs.length;i+=4)await Promise.all(jobs.slice(i,i+4).map(async j=>{
+    const remove=()=>env.DB.prepare(`DELETE FROM chat_push_outbox WHERE message_id=? AND token=?`).bind(j.message_id,j.token).run();
+    if(!canWeb(j,"view_journal")){await remove();return;}
+    const lease=await env.DB.prepare(`UPDATE chat_push_outbox SET next_at=?,attempts=attempts+1 WHERE message_id=? AND token=? AND next_at<=?`).bind(now+120000,j.message_id,j.token,now).run();
+    if(!lease.meta?.changes)return;
+    try{
+      const data={kind:"chat",message_id:String(j.message_id),account_id:String(j.account_id),title:String(j.author||"Журнал 102"),body:String(j.message||"Новое сообщение в чате").slice(0,180)};
+      const message={token:j.token,data};
+      if(j.platform==="android")message.android={priority:"HIGH",ttl:"3600s"};
+      else message.webpush={headers:{TTL:"3600",Urgency:"high"}};
+      const r=await fetch("https://fcm.googleapis.com/v1/projects/"+PUSH_PROJECT+"/messages:send",{method:"POST",headers:{authorization:"Bearer "+bearer,"content-type":"application/json"},body:JSON.stringify({message}),signal:AbortSignal.timeout(10000)});
+      if(r.ok){await remove();return;}
+      const d=await r.json().catch(()=>({}));
+      const invalid=(d.error?.details||[]).some(x=>x.errorCode==="UNREGISTERED");
+      if(invalid){await env.DB.prepare(`DELETE FROM chat_push_devices WHERE token=? AND session_id=?`).bind(j.token,j.session_id).run();await remove();return;}
+      if(r.status===401)pushOAuthCache=null;
+      console.warn("chat_push_retry",r.status); // No tokens, credentials or message text in logs.
+    }catch(_){console.warn("chat_push_network_retry");}
+    await env.DB.prepare(`UPDATE chat_push_outbox SET next_at=? WHERE message_id=? AND token=?`).bind(Date.now()+Math.min(3600000,60000*Math.pow(2,j.attempts)),j.message_id,j.token).run();
+  }));
+}
+async function pushApi(request,env,user,body,path){
+  await initPushDb(env);
+  const token=String(body.token||"");
+  if(token.length<20||token.length>4096||/\s/.test(token))return jsonResponse({error:"Некорректный push-токен"},400);
+  const session=await sha256Hex(cookieValue(request,"journal_session"));
+  if(path==="/api/push/unregister"){
+    await env.DB.prepare(`DELETE FROM chat_push_devices WHERE token=? AND account_id=? AND session_id=?`).bind(token,user.id,session).run();
+    return jsonResponse({ok:true});
+  }
+  if(!["android","web"].includes(body.platform))return jsonResponse({error:"Некорректная платформа"},400);
+  await env.DB.prepare(`INSERT INTO chat_push_devices(token,account_id,session_id,platform,updated_at) VALUES(?,?,?,?,?)
+    ON CONFLICT(token) DO UPDATE SET account_id=excluded.account_id,session_id=excluded.session_id,platform=excluded.platform,updated_at=excluded.updated_at`).bind(token,user.id,session,body.platform,Date.now()).run();
+  return jsonResponse({ok:true,configured:!!env.FCM_SERVICE_ACCOUNT_JSON});
+}
+
+var CHAT_PUSH_SW = "// Installed at the site root. Never caches pages or authenticated API responses.\nself.addEventListener('notificationclick',event=>{\n  event.notification.close();\n  event.waitUntil((async()=>{\n    const windows=await self.clients.matchAll({type:'window',includeUncontrolled:true});\n    for(const client of windows){if(new URL(client.url).origin===self.location.origin){client.postMessage({type:'OPEN_CHAT'});await client.focus();return;}}\n    await self.clients.openWindow('/?open=chat');\n  })());\n});\nself.addEventListener('install',()=>self.skipWaiting());\nself.addEventListener('activate',event=>event.waitUntil(self.clients.claim()));\nimportScripts('https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js');\nimportScripts('https://www.gstatic.com/firebasejs/10.13.2/firebase-messaging-compat.js');\nfirebase.initializeApp(__PUSH_CONFIG__);\nasync function showChatPush(payload){\n  const d=payload.data||{};if(d.kind!=='chat'||!d.message_id)return;\n  const cache=await caches.open('journal102-push-settings');\n  const saved=await cache.match('/__push-preference');\n  const pref=saved?await saved.json():{};if(!pref.enabled||pref.account!==d.account_id)return;\n  // Re-check the current login before displaying queued notifications.\n  const r=await fetch('/api/me',{credentials:'include',cache:'no-store'}).catch(()=>null);\n  if(!r||!r.ok)return;\n  const user=await r.json();if(String(user.id)!==d.account_id)return;\n  const windows=await self.clients.matchAll({type:'window',includeUncontrolled:true});\n  if(windows.some(c=>c.visibilityState==='visible'&&new URL(c.url).searchParams.get('open')==='chat'))return;\n  await self.registration.showNotification(d.title||'Журнал 102',{body:d.body||'Новое сообщение в чате',tag:'journal102-chat-'+d.message_id,renotify:false,data:{messageId:d.message_id},badge:'/push-icon.svg',icon:'/push-icon.svg'});\n}\nfirebase.messaging().onBackgroundMessage(showChatPush);\nself.addEventListener('message',event=>{\n  if(event.data&&event.data.type==='SET_PUSH_ENABLED')event.waitUntil((async()=>{\n    try{const cache=await caches.open('journal102-push-settings');await cache.put('/__push-preference',new Response(JSON.stringify({enabled:!!event.data.enabled,account:String(event.data.account||'')})));if(!event.data.enabled){const items=await self.registration.getNotifications();items.forEach(n=>n.close())}if(event.ports[0])event.ports[0].postMessage({ok:true});}catch(_){if(event.ports[0])event.ports[0].postMessage({ok:false})}\n  })());\n  if(event.data&&event.data.type==='SHOW_CHAT_PUSH')event.waitUntil(showChatPush(event.data.payload));\n  if(event.data&&event.data.type==='CLEAR_CHAT_PUSH')event.waitUntil(self.registration.getNotifications().then(items=>items.forEach(n=>n.close())));\n});\n";
 var WEB_APP_HTML = `<!doctype html>
 <html lang="ru">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#191b1f">
-<meta name="application-version" content="2.2.2">
+<meta name="application-version" content="2.2.3">
 <title>Журнал группы 102</title>
 <style>
 /* Embedded Inter fonts.
@@ -26004,7 +26099,7 @@ body.chat-open{overflow:hidden}
   </div>
 </div>
 <div id="shell" class="hidden">
-  <aside class="sidebar"><div class="side-brand brand"><div class="logo" aria-hidden="true">J</div><div class="brand-copy"><b>Журнал 102</b><small>Всё под рукой</small></div></div><nav class="nav-scroll" id="sideNav" aria-label="Разделы журнала"></nav><div class="side-footer"><div class="avatar" id="accountInitials" aria-hidden="true"></div><div style="min-width:0;overflow-wrap:anywhere"><b id="accountName"></b><small id="accountRole"></small></div><span class="side-version">2.2.2</span></div></aside>
+  <aside class="sidebar"><div class="side-brand brand"><div class="logo" aria-hidden="true">J</div><div class="brand-copy"><b>Журнал 102</b><small>Всё под рукой</small></div></div><nav class="nav-scroll" id="sideNav" aria-label="Разделы журнала"></nav><div class="side-footer"><div class="avatar" id="accountInitials" aria-hidden="true"></div><div style="min-width:0;overflow-wrap:anywhere"><b id="accountName"></b><small id="accountRole"></small></div><span class="side-version">2.2.3</span></div></aside>
   <main class="main"><header class="topbar"><div class="breadcrumb"><span>Группа 102</span><h1 id="pageTitle">Главная</h1></div><div class="spacer"></div><input class="search" id="globalSearch" type="search" aria-label="Поиск по журналу" placeholder="Поиск по журналу…"><button class="btn ghost icon-btn search-open" id="openSearch" aria-label="Поиск по журналу"></button><button class="btn ghost" id="logout">Выйти</button></header><div class="content" id="content"></div></main>
   <nav class="mobile-nav" id="mobileNav" aria-label="Основные разделы"></nav>
 </div><div id="modalRoot"></div>
@@ -26025,7 +26120,64 @@ async function api(path,opt){opt=opt||{};opt.headers=Object.assign({'content-typ
 function toast(t){document.querySelectorAll('.toast').forEach(function(x){x.remove()});var d=document.createElement('div');d.className='toast';d.setAttribute('role','status');d.textContent=t;document.body.appendChild(d);setTimeout(function(){d.remove()},2200)}
 function fmtDate(d){try{return new Date(d+'T12:00:00').toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'})}catch(e){return d}}
 function showAuth(){state.me=null;document.body.classList.remove('chat-open','chat-typing');if(state.chatWatch){clearInterval(state.chatWatch);state.chatWatch=null}state.refreshPresence=null;document.getElementById('auth').classList.remove('hidden');document.getElementById('shell').classList.add('hidden')}
-function showShell(){document.getElementById('auth').classList.add('hidden');document.getElementById('shell').classList.remove('hidden');renderNav();go('dashboard');presencePulse();startChatWatch()}
+function showShell(){document.getElementById('auth').classList.add('hidden');document.getElementById('shell').classList.remove('hidden');renderNav();var openChat=new URL(location.href).searchParams.get('open')==='chat'||sessionStorage.getItem('journal102_open_chat')==='1';sessionStorage.removeItem('journal102_open_chat');go(openChat?'chat':'dashboard');presencePulse();startChatWatch();restoreChatPush()}
+// Firebase loads only when the user enables push, or restores a previous opt-in.
+var journalPush={enabled:false,busy:false,messaging:null,registration:null,sdk:null,ready:false,token:'',onChange:null};
+function pushChanged(){if(journalPush.onChange)journalPush.onChange()}
+async function pushWorkerMessage(message){
+  var reg=journalPush.registration||await navigator.serviceWorker.getRegistration('/');
+  if(!reg||!reg.active)return;
+  await new Promise(function(resolve,reject){var ch=new MessageChannel(),t=setTimeout(function(){reject(new Error('Сервис уведомлений не отвечает'))},5000);ch.port1.onmessage=function(e){clearTimeout(t);if(e.data&&e.data.ok)resolve();else reject(new Error('Не удалось сохранить настройку уведомлений'))};reg.active.postMessage(message,[ch.port2])});
+}
+async function setupPush(){
+  if(journalPush.messaging)return;
+  if(!window.isSecureContext||!('serviceWorker'in navigator)||!('Notification'in window))throw new Error('Этот браузер не поддерживает push. На iPhone открой сайт с домашнего экрана.');
+  var appModule=await import('https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js');
+  var sdk=await import('https://www.gstatic.com/firebasejs/10.13.2/firebase-messaging.js');
+  if(!await sdk.isSupported())throw new Error('Push-уведомления не поддерживаются этим браузером');
+  var config=await api('/api/push/status');
+  var app=appModule.getApps().find(function(a){return a.name==='journal102-push'})||appModule.initializeApp(config.firebase,'journal102-push');
+  await navigator.serviceWorker.register('/firebase-messaging-sw.js',{scope:'/'});
+  journalPush.registration=await navigator.serviceWorker.ready;
+  journalPush.sdk=sdk;journalPush.messaging=sdk.getMessaging(app);
+  sdk.onMessage(journalPush.messaging,function(payload){
+    if(!state.me||!journalPush.enabled||String(state.me.id)!==String((payload.data||{}).account_id))return;
+    if(state.page==='chat'&&!document.hidden)return;
+    if(journalPush.registration.active)journalPush.registration.active.postMessage({type:'SHOW_CHAT_PUSH',payload:payload});
+  });
+}
+async function enableChatPush(ask){
+  if(journalPush.busy||!state.me)return;
+  journalPush.busy=true;pushChanged();var account=String(state.me.id);
+  try{
+    if(!('Notification'in window))throw new Error('В этом браузере уведомления недоступны');
+    var permission=Notification.permission;
+    if(ask&&permission==='default')permission=await Notification.requestPermission();
+    if(permission!=='granted')throw new Error('Разреши уведомления для сайта в настройках браузера');
+    await setupPush();
+    var token=await journalPush.sdk.getToken(journalPush.messaging,{vapidKey:'BD8k3GSEdVzc8zB-d40haWnACdknQX9sHzT_NrdjZd_qZ_KrWaRWjNmFbREKNRlzRH-kLtZbmF8CSC6Uc2b0-Mw',serviceWorkerRegistration:journalPush.registration});
+    if(!token)throw new Error('Не удалось получить токен уведомлений');
+    if(!state.me||String(state.me.id)!==account)return;
+    var result=await api('/api/push/register',{method:'POST',body:JSON.stringify({token:token,platform:'web'})});
+    if(!state.me||String(state.me.id)!==account)return;
+    await pushWorkerMessage({type:'SET_PUSH_ENABLED',enabled:true,account:account});
+    journalPush.token=token;journalPush.enabled=true;journalPush.ready=!!result.configured;localStorage.setItem('journal102_push_enabled','1');
+    if(ask)toast(result.configured?'Уведомления чата включены':'Подписка сохранена. Нужно подключить Firebase к серверу.');
+  }catch(e){if(ask)toast(e.message)}finally{journalPush.busy=false;pushChanged()}
+}
+async function disableChatPush(){
+  if(journalPush.busy)return;journalPush.busy=true;pushChanged();
+  try{
+    await pushWorkerMessage({type:'SET_PUSH_ENABLED',enabled:false});
+    journalPush.enabled=false;localStorage.setItem('journal102_push_enabled','0');
+    if(journalPush.token)await api('/api/push/unregister',{method:'POST',body:JSON.stringify({token:journalPush.token})});
+    toast('Уведомления чата выключены');
+  }catch(e){toast(e.message)}finally{journalPush.busy=false;pushChanged()}
+}
+function restoreChatPush(){if(localStorage.getItem('journal102_push_enabled')==='1'&&'Notification'in window&&Notification.permission==='granted')enableChatPush(false)}
+if('serviceWorker'in navigator)navigator.serviceWorker.addEventListener('message',function(e){if(e.data&&e.data.type==='OPEN_CHAT'){if(state.me)go('chat');else sessionStorage.setItem('journal102_open_chat','1')}});
+document.addEventListener('visibilitychange',function(){if(!document.hidden&&state.me)restoreChatPush()});
+
 var iconPaths={
  dashboard:'<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/>',
  journal:'<path d="M8 3h10a2 2 0 0 1 2 2v16H8a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3Z"/><path d="M5 17h15M9 7h7M9 11h5"/>',
@@ -26079,6 +26231,7 @@ function renderNav(){
 }
 async function go(p){
  if(!canPage(p)){toast('Раздел недоступен для вашего аккаунта');return}
+ var routeUrl=new URL(location.href);if(p==='chat')routeUrl.searchParams.set('open','chat');else routeUrl.searchParams.delete('open');history.replaceState(null,'',routeUrl);
  var changed=state.page!==p;state.page=p;state.onStatusSaved=null;state.refreshPresence=null;renderNav();
  var n=nav.find(function(x){return x[0]===p});document.getElementById('pageTitle').textContent=n?n[2]:'';
  var old=document.getElementById('content'),c=document.createElement('div');c.className='content';c.id='content';old.replaceWith(c);
@@ -26136,7 +26289,7 @@ async function chatWatchPulse(){
    if(rows.length&&state.page!=='chat'){
      state.chatUnread=Math.min(999,(state.chatUnread||0)+rows.length);
      var newest=rows[rows.length-1];state.chatLastSeen=Math.max(state.chatLastSeen||0,...rows.map(function(x){return Number(x.id)||0}));localStorage.setItem('chatLastSeen',String(state.chatLastSeen));renderNav();
-     if('Notification'in window&&Notification.permission==='granted'){try{new Notification((newest.author||'Журнал 102'),{body:newest.message||'Новое сообщение',tag:'journal102-chat'})}catch(_){}}
+     // System notifications are delivered by FCM; polling updates only unread badges.
    }
  }catch(_){}
 }
@@ -26615,7 +26768,7 @@ pages.chat=async function(c){
  box.onscroll=syncScrollTools;jump.onclick=function(){box.scrollTo({top:box.scrollHeight,behavior:'smooth'})};newBtn.onclick=jump.onclick;
  c.querySelector('#emojiBtn').onclick=function(){emojiPanel.classList.toggle('hidden')};
  emojiPanel.querySelectorAll('button').forEach(function(b){b.onclick=function(){var st=input.selectionStart==null?input.value.length:input.selectionStart,en=input.selectionEnd==null?st:input.selectionEnd;if(input.value.length-(en-st)+b.textContent.length>1500)return;input.value=input.value.slice(0,st)+b.textContent+input.value.slice(en);input.focus();input.selectionStart=input.selectionEnd=st+b.textContent.length;emojiPanel.classList.add('hidden');input.dispatchEvent(new Event('input'))}});
- function notifState(){if(!('Notification'in window)){notify.textContent='🔕 Не поддерживается';notify.disabled=true;return}notify.textContent=Notification.permission==='granted'?'🔔 Включены':'🔔 Уведомления';notify.classList.toggle('chat-notify-on',Notification.permission==='granted')}notifState();
+ function notifState(){notify.disabled=journalPush.busy;notify.textContent=journalPush.busy?'Подключаем…':journalPush.enabled?(journalPush.ready?'🔔 Включены':'🔔 Ожидание сервера'):'🔔 Включить';notify.classList.toggle('chat-notify-on',journalPush.enabled)}journalPush.onChange=notifState;notifState();
  function dayLabel(iso){var d=new Date(iso),now=new Date(),y=new Date();y.setDate(now.getDate()-1);var key=d.toLocaleDateString('ru-RU');if(key===now.toLocaleDateString('ru-RU'))return'Сегодня';if(key===y.toLocaleDateString('ru-RU'))return'Вчера';return d.toLocaleDateString('ru-RU',{day:'numeric',month:'long'})}
  function render(rows,append){
    if(!append){box.innerHTML='';lastDay=''}
@@ -26631,8 +26784,8 @@ pages.chat=async function(c){
  c.querySelector('#chatForm').onsubmit=async function(e){e.preventDefault();var text=input.value.trim();if(!text||sending||!active())return;sending=true;input.disabled=true;updateSend();emojiPanel.classList.add('hidden');try{await api('/api/chat',{method:'POST',body:JSON.stringify({message:text})});if(!active())return;input.value='';input.style.height='auto';box.scrollTop=box.scrollHeight;await load();if(active()){box.scrollTop=box.scrollHeight;syncScrollTools()}}catch(e){if(active())toast(e.message)}finally{sending=false;if(active()){input.disabled=false;updateSend();input.focus();fitChat()}}};
  input.oninput=function(){this.style.height='auto';this.style.height=Math.min(this.scrollHeight,130)+'px';updateSend();fitChat()};
  input.onkeydown=function(e){if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing&&window.matchMedia('(pointer:fine)').matches){e.preventDefault();c.querySelector('#chatForm').requestSubmit()}};
- notify.onclick=async function(){if(!('Notification'in window))return;var p=await Notification.requestPermission();notifState();toast(p==='granted'?'Уведомления включены 🔔':'Браузер не разрешил уведомления')};
- function cleanup(){if(disposed)return;disposed=true;clearInterval(timer);sizeObserver.disconnect();window.removeEventListener('resize',fitChat);if(window.visualViewport)window.visualViewport.removeEventListener('resize',fitChat);obs.disconnect();if(!document.querySelector('#content .chat-shell')){document.body.classList.remove('chat-open','chat-typing');document.body.style.removeProperty('--chat-viewport');document.body.style.removeProperty('--chat-nav-height')}}
+ notify.onclick=function(){if(journalPush.enabled)disableChatPush();else enableChatPush(true)};
+ function cleanup(){if(disposed)return;disposed=true;if(journalPush.onChange===notifState)journalPush.onChange=null;clearInterval(timer);sizeObserver.disconnect();window.removeEventListener('resize',fitChat);if(window.visualViewport)window.visualViewport.removeEventListener('resize',fitChat);obs.disconnect();if(!document.querySelector('#content .chat-shell')){document.body.classList.remove('chat-open','chat-typing');document.body.style.removeProperty('--chat-viewport');document.body.style.removeProperty('--chat-nav-height')}}
  var obs=new MutationObserver(function(){if(!c.isConnected)cleanup()});obs.observe(document.body,{childList:true,subtree:true});
  await load();if(active())timer=setInterval(load,3000);else cleanup();
 };
@@ -26894,7 +27047,7 @@ pages.settings=async function(c){
 };
 
 document.getElementById('logout').onclick=async function(){
-  await api('/api/logout',{method:'POST',body:'{}'});
+  await api('/api/logout',{method:'POST',body:'{}'});journalPush.enabled=false;if('serviceWorker'in navigator)await pushWorkerMessage({type:'SET_PUSH_ENABLED',enabled:false}).catch(function(){});
   var tg=window.Telegram&&window.Telegram.WebApp;
   if(tg&&tg.initData){
     try{tg.close();return}catch(e){}
@@ -27604,7 +27757,7 @@ async function parentsApi(env, month) {
   }));
 }
 __name(parentsApi, "parentsApi");
-async function handleWebApi(request, env, url) {
+async function handleWebApi(request, env, url, ctx) {
   try {
     const path = url.pathname;
     const body = request.method === "GET" ? {} : await request.json().catch(() => ({}));
@@ -27631,11 +27784,15 @@ async function handleWebApi(request, env, url) {
       const raw = cookieValue(request, "journal_session");
       if (raw) {
         const h = await sha256Hex(raw);
+        await initPushDb(env);
+        await env.DB.prepare(`DELETE FROM chat_push_devices WHERE session_id=?`).bind(h).run();
         await env.DB.prepare(`DELETE FROM web_sessions WHERE session_id=?`).bind(h).run();
       }
       return jsonResponse({ ok: true }, 200, { "set-cookie": "journal_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0" });
     }
     const user = await requireWeb(request, env, "view_journal");
+    if(path==='/api/push/status'&&request.method==='GET')return jsonResponse({configured:!!env.FCM_SERVICE_ACCOUNT_JSON,firebase:PUSH_WEB_CONFIG});
+    if(['/api/push/register','/api/push/unregister'].includes(path)&&request.method==='POST')return await pushApi(request,env,user,body,path);
     if (path === "/api/me") return jsonResponse({ id: user.id, display_name: user.display_name, login: user.login, role: user.role, telegram_user_id: user.telegram_user_id, permissions: parsePermissions(user) });
     if (path === "/api/dashboard") return jsonResponse(await dashboardApi(env));
     if (path === "/api/students" && request.method === "GET") return jsonResponse({ students: await orderedStudents(env, true) });
@@ -28277,7 +28434,9 @@ async function handleWebApi(request, env, url) {
       const author=String(user.display_name||user.login||"Пользователь").slice(0,100),now=new Date().toISOString();
       const r=await env.DB.prepare(`INSERT INTO web_chat_messages(account_id,author,message,created_at) VALUES(?,?,?,?)`)
         .bind(Number(user.id),author,message,now).run();
-      return jsonResponse({ok:true,id:r.meta?.last_row_id||null});
+      const messageId=r.meta?.last_row_id||null;
+      if(messageId){const pending=enqueueChatPush(env,messageId,Number(user.id)).catch(()=>console.warn("chat_push_enqueue_failed"));if(ctx&&ctx.waitUntil)ctx.waitUntil(pending);else await pending;}
+      return jsonResponse({ok:true,id:messageId});
     }
 
     if (path === "/api/online") {
