@@ -25959,6 +25959,11 @@ input:not([type=checkbox]):not([type=radio]),select,textarea{min-width:0;max-wid
 #mobileNav button[data-p="chat"]{position:relative}#mobileNav button[data-p="chat"] svg{width:26px;height:26px;stroke-width:2.2;color:#79a9c9}#mobileNav button[data-p="chat"] span{font-weight:900;color:#dbe9f2}#mobileNav button[data-p="chat"].on{background:rgba(76,117,146,.18);border-radius:14px}
 .chat-notify-on{background:#35546a!important;border-color:#547994!important;color:#fff!important}
 @media(max-width:700px){.content:has(.chat-shell){padding:6px 8px 0!important}.content:has(.chat-shell)>.page-heading{margin:2px 4px 8px}.chat-shell{height:calc(100dvh - 158px);min-height:0;border-radius:17px}.chat-messages{padding:12px 8px}.chat-row{max-width:91%}.chat-text{font-size:16px}.chat-compose{padding:8px}.chat-head{padding:10px 12px}.chat-avatar{width:38px;height:38px}.chat-mini-avatar{width:27px;height:27px;flex-basis:27px}}
+
+.chat-tools{display:flex;align-items:flex-end;gap:7px;position:relative}.chat-emoji-btn{width:44px;height:44px;border:0;border-radius:50%;background:transparent;color:#aab9c3;font-size:23px;cursor:pointer}.chat-emoji-btn:hover{background:#2b3942}.chat-emoji-panel{position:absolute;left:0;bottom:54px;width:min(310px,82vw);padding:10px;background:#202b32;border:1px solid #3b4b56;border-radius:16px;box-shadow:0 16px 42px rgba(0,0,0,.38);display:grid;grid-template-columns:repeat(7,1fr);gap:3px;z-index:20}.chat-emoji-panel.hidden{display:none}.chat-emoji-panel button{border:0;background:transparent;border-radius:9px;font-size:22px;padding:5px;cursor:pointer}.chat-emoji-panel button:hover{background:#31414c}.chat-jump{position:absolute;right:18px;bottom:76px;width:42px;height:42px;border-radius:50%;border:1px solid #476071;background:#263945;color:#eaf2f6;box-shadow:0 5px 18px rgba(0,0,0,.28);z-index:10;font-size:20px;display:grid;place-items:center}.chat-jump.hidden{display:none}.chat-new-pill{position:absolute;left:50%;transform:translateX(-50%);bottom:78px;background:#35546a;color:#f3f7f9;border:1px solid #50738b;border-radius:999px;padding:6px 11px;font-size:12px;font-weight:800;z-index:10;box-shadow:0 5px 18px rgba(0,0,0,.22)}.chat-new-pill.hidden{display:none}.chat-send svg{width:22px;height:22px;fill:currentColor}.chat-send{color:#f7fbfd!important}
+@media(max-width:700px){
+ body.chat-open{overflow:hidden;height:100dvh}.chat-open #shell{height:100dvh;overflow:hidden}.chat-open .main{height:100dvh;overflow:hidden}.chat-open .topbar{flex:0 0 auto}.chat-open #content{height:calc(100dvh - 132px);overflow:hidden;padding:0 8px!important}.chat-open #content>.page-heading{display:none}.chat-open .chat-shell{height:100%;min-height:0;border-radius:16px 16px 0 0;margin:0}.chat-open .chat-messages{overscroll-behavior:contain;-webkit-overflow-scrolling:touch}.chat-open .chat-compose{padding-bottom:calc(8px + env(safe-area-inset-bottom))}.chat-jump{right:12px;bottom:70px}.chat-new-pill{bottom:72px}
+}
 </style>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
@@ -26571,38 +26576,38 @@ pages.reports=async function(c){
 function presenceAgo(value,now){var stamp=Date.parse(value||'');if(!Number.isFinite(stamp)||stamp>now+30000)return 'Нет данных об активности';var age=Math.max(0,now-stamp);if(age<60000)return 'Активность только что';if(age<3600000)return 'Активность '+Math.floor(age/60000)+' мин. назад';if(age<86400000)return 'Активность '+Math.floor(age/3600000)+' ч. назад';return 'Последняя активность: '+new Date(stamp).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}
 
 pages.chat=async function(c){
- var lastId=0,loading=false,timer=null,first=true,lastDay='';
- state.chatUnread=0;renderNav();
+ var lastId=0,loading=false,timer=null,first=true,lastDay='',newAway=0;
+ document.body.classList.add('chat-open');state.chatUnread=0;renderNav();
+ var sendSvg='<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.6 2.4a1.35 1.35 0 0 0-1.42-.28L3.1 8.76a1.42 1.42 0 0 0 .1 2.68l6.35 2.1 2.1 6.35a1.42 1.42 0 0 0 2.68.1l6.65-17.08a1.35 1.35 0 0 0-.28-1.42ZM11.1 12.9 6.2 11.27l11.17-4.35-6.27 5.98Zm1.63 4.9-1.64-4.91 5.99-6.27-4.35 11.18Z"/></svg>';
+ var emojis=['😀','😂','😊','😍','🥰','😎','🤔','😅','🤣','😉','👍','👎','❤️','🔥','👏','🙏','👌','💪','🎉','✅','❌','🤝','👀','💯','🤦','😁','😴','🤷'];
  c.innerHTML=pageHeading('Чат','Общий чат группы 102','<button class="btn secondary" id="chatNotify">🔔 Уведомления</button>')+
  '<section class="card chat-shell"><div class="chat-head"><div class="chat-head-copy"><div class="chat-avatar">102</div><div><b>Группа 102</b><div class="small muted"><span class="chat-online-dot" style="display:inline-block;margin-right:7px"></span>учителя и администрация</div></div></div><span class="small muted" id="chatStatus">Подключаемся…</span></div>'+
- '<div class="chat-messages" id="chatMessages"><div class="chat-empty">Загружаем сообщения…</div></div>'+
- '<form class="chat-compose" id="chatForm"><textarea id="chatInput" maxlength="1500" rows="1" placeholder="Сообщение" aria-label="Сообщение"></textarea><button class="btn chat-send" type="submit" aria-label="Отправить">➤</button></form></section>';
- var box=c.querySelector('#chatMessages'),input=c.querySelector('#chatInput'),status=c.querySelector('#chatStatus'),notify=c.querySelector('#chatNotify');
- function notifState(){if(!('Notification'in window)){notify.textContent='🔕 Не поддерживается';notify.disabled=true;return}notify.textContent=Notification.permission==='granted'?'🔔 Включены':'🔔 Уведомления';notify.classList.toggle('chat-notify-on',Notification.permission==='granted')}
- notifState();
+ '<div class="chat-messages" id="chatMessages"><div class="chat-empty">Загружаем сообщения…</div></div><button class="chat-new-pill hidden" id="chatNew">Новые сообщения</button><button class="chat-jump hidden" id="chatJump" aria-label="Вниз">↓</button>'+
+ '<form class="chat-compose" id="chatForm"><div class="chat-tools"><button class="chat-emoji-btn" id="emojiBtn" type="button" aria-label="Смайлики">☺</button><div class="chat-emoji-panel hidden" id="emojiPanel">'+emojis.map(function(x){return'<button type="button">'+x+'</button>'}).join('')+'</div></div><textarea id="chatInput" maxlength="1500" rows="1" placeholder="Сообщение" aria-label="Сообщение"></textarea><button class="btn chat-send" type="submit" aria-label="Отправить">'+sendSvg+'</button></form></section>';
+ var box=c.querySelector('#chatMessages'),input=c.querySelector('#chatInput'),status=c.querySelector('#chatStatus'),notify=c.querySelector('#chatNotify'),jump=c.querySelector('#chatJump'),newBtn=c.querySelector('#chatNew'),emojiPanel=c.querySelector('#emojiPanel');
+ function nearBottom(){return box.scrollHeight-box.scrollTop-box.clientHeight<140}
+ function syncScrollTools(){var near=nearBottom();jump.classList.toggle('hidden',near);if(near){newAway=0;newBtn.classList.add('hidden')}}
+ box.onscroll=syncScrollTools;jump.onclick=function(){box.scrollTo({top:box.scrollHeight,behavior:'smooth'})};newBtn.onclick=jump.onclick;
+ c.querySelector('#emojiBtn').onclick=function(){emojiPanel.classList.toggle('hidden')};
+ emojiPanel.querySelectorAll('button').forEach(function(b){b.onclick=function(){var st=input.selectionStart||input.value.length,en=input.selectionEnd||st;input.value=input.value.slice(0,st)+b.textContent+input.value.slice(en);input.focus();input.selectionStart=input.selectionEnd=st+b.textContent.length;emojiPanel.classList.add('hidden');input.dispatchEvent(new Event('input'))}});
+ function notifState(){if(!('Notification'in window)){notify.textContent='🔕 Не поддерживается';notify.disabled=true;return}notify.textContent=Notification.permission==='granted'?'🔔 Включены':'🔔 Уведомления';notify.classList.toggle('chat-notify-on',Notification.permission==='granted')}notifState();
  function dayLabel(iso){var d=new Date(iso),now=new Date(),y=new Date();y.setDate(now.getDate()-1);var key=d.toLocaleDateString('ru-RU');if(key===now.toLocaleDateString('ru-RU'))return'Сегодня';if(key===y.toLocaleDateString('ru-RU'))return'Вчера';return d.toLocaleDateString('ru-RU',{day:'numeric',month:'long'})}
  function render(rows,append){
    if(!append){box.innerHTML='';lastDay=''}
    if(!rows.length&&!append){box.innerHTML='<div class="chat-empty"><b>Здесь пока тихо</b><div style="margin-top:6px">Напиши первое сообщение 👋</div></div>';return}
-   rows.forEach(function(m){
-     var day=dayLabel(m.created_at);if(day!==lastDay){var sep=document.createElement('div');sep.className='chat-day';sep.textContent=day;box.appendChild(sep);lastDay=day}
-     var row=document.createElement('div');row.className='chat-row '+(Number(m.mine)?'mine':'other');
-     var av=Number(m.mine)?'':('<div class="chat-mini-avatar">'+esc(initials(m.author||'?'))+'</div>');
-     row.innerHTML=av+'<article class="chat-msg">'+(Number(m.mine)?'':'<div class="chat-author">'+esc(m.author||'Пользователь')+'</div>')+'<div class="chat-text">'+esc(m.message)+'</div><div class="chat-time">'+esc(m.time_text||'')+'</div></article>';
-     box.appendChild(row);lastId=Math.max(lastId,Number(m.id)||0);
-   });
+   rows.forEach(function(m){var day=dayLabel(m.created_at);if(day!==lastDay){var sep=document.createElement('div');sep.className='chat-day';sep.textContent=day;box.appendChild(sep);lastDay=day}var row=document.createElement('div');row.className='chat-row '+(Number(m.mine)?'mine':'other');var av=Number(m.mine)?'':('<div class="chat-mini-avatar">'+esc(initials(m.author||'?'))+'</div>');row.innerHTML=av+'<article class="chat-msg">'+(Number(m.mine)?'':'<div class="chat-author">'+esc(m.author||'Пользователь')+'</div>')+'<div class="chat-text">'+esc(m.message)+'</div><div class="chat-time">'+esc(m.time_text||'')+'</div></article>';box.appendChild(row);lastId=Math.max(lastId,Number(m.id)||0)}
  }
  async function load(){
    if(loading||!c.isConnected||state.page!=='chat')return;loading=true;
-   try{var d=await api('/api/chat?after='+(first?0:lastId),{cache:'no-store'}),rows=d.messages||[],near=box.scrollHeight-box.scrollTop-box.clientHeight<130;render(rows,!first);status.textContent='в сети';if(first||near)box.scrollTop=box.scrollHeight;if(lastId){state.chatLastSeen=lastId;localStorage.setItem('chatLastSeen',String(lastId))}first=false}
+   try{var wasNear=nearBottom(),d=await api('/api/chat?after='+(first?0:lastId),{cache:'no-store'}),rows=d.messages||[];render(rows,!first);status.textContent='в сети';if(first||wasNear)box.scrollTop=box.scrollHeight;else if(rows.length){newAway+=rows.length;newBtn.textContent=newAway+' '+(newAway===1?'новое сообщение':'новых сообщения');newBtn.classList.remove('hidden')}if(lastId){state.chatLastSeen=lastId;localStorage.setItem('chatLastSeen',String(lastId))}first=false;syncScrollTools()}
    catch(e){status.textContent='нет связи'}finally{loading=false}
  }
- c.querySelector('#chatForm').onsubmit=async function(e){e.preventDefault();var text=input.value.trim();if(!text)return;var b=this.querySelector('button');b.disabled=true;try{await api('/api/chat',{method:'POST',body:JSON.stringify({message:text})});input.value='';input.style.height='auto';await load();box.scrollTop=box.scrollHeight}catch(e){toast(e.message)}finally{b.disabled=false;input.focus()}};
+ c.querySelector('#chatForm').onsubmit=async function(e){e.preventDefault();var text=input.value.trim();if(!text)return;var b=this.querySelector('.chat-send');b.disabled=true;emojiPanel.classList.add('hidden');try{await api('/api/chat',{method:'POST',body:JSON.stringify({message:text})});input.value='';input.style.height='auto';await load();box.scrollTop=box.scrollHeight;syncScrollTools()}catch(e){toast(e.message)}finally{b.disabled=false;input.focus()}};
  input.oninput=function(){this.style.height='auto';this.style.height=Math.min(this.scrollHeight,130)+'px'};
  input.onkeydown=function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();c.querySelector('#chatForm').requestSubmit()}};
  notify.onclick=async function(){if(!('Notification'in window))return;var p=await Notification.requestPermission();notifState();toast(p==='granted'?'Уведомления включены 🔔':'Браузер не разрешил уведомления')};
  await load();timer=setInterval(load,3000);
- var obs=new MutationObserver(function(){if(!c.isConnected){clearInterval(timer);obs.disconnect()}});obs.observe(document.body,{childList:true,subtree:true});
+ var obs=new MutationObserver(function(){if(!c.isConnected){document.body.classList.remove('chat-open');clearInterval(timer);obs.disconnect()}});obs.observe(document.body,{childList:true,subtree:true});
 };
 pages.online=async function(c){
  var loading=false;
