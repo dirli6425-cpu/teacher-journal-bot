@@ -25946,19 +25946,19 @@ input:not([type=checkbox]):not([type=radio]),select,textarea{min-width:0;max-wid
 #chDay>.grid{grid-template-columns:repeat(5,minmax(0,1fr))}@media(max-width:1000px){#chDay>.grid{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:760px){#chDay>.grid{grid-template-columns:repeat(2,minmax(0,1fr))}#chDay>.grid>.metric-card:last-child{grid-column:1/-1;display:flex;align-items:center;gap:18px}#chDay>.grid>.metric-card:last-child .metric{margin:0 0 0 auto}}
 .presence-summary{display:flex;align-items:center;justify-content:space-between;gap:15px;flex-wrap:wrap;margin-bottom:20px}.presence-list{display:grid;gap:12px}.presence-row{display:grid;grid-template-columns:44px minmax(0,1fr) auto;align-items:center;gap:16px;padding:20px 22px}.presence-copy{min-width:0}.presence-copy b{font-size:15px;display:block;overflow-wrap:anywhere}.presence-copy small{display:block;margin-top:5px;font-size:12px;color:var(--muted)}.presence-badge{display:inline-flex;align-items:center;gap:8px;white-space:nowrap;padding:8px 11px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;color:var(--muted);font-size:12px}.presence-badge.is-online{color:#91ddaf;border-color:#456852;background:#293d32}.presence-dot{display:inline-block;width:9px;height:9px;min-width:9px;border-radius:50%;background:#8993a2;flex-shrink:0}.presence-dot.is-online{background:#71cb97}.presence-hint{margin-top:18px}.presence-error{color:var(--warn)}@media(max-width:600px){.presence-row{grid-template-columns:38px minmax(0,1fr);gap:8px 12px;padding:18px}.presence-row>.avatar{grid-row:1/3;align-self:center}.presence-copy b{font-size:15px}.presence-badge{grid-column:2;justify-self:start;padding:4px 0;background:none;border:0}.presence-badge.is-online{background:none}.presence-copy small{line-height:1.5}.presence-summary{gap:10px}.presence-summary>#onlineUpdated{width:100%;font-size:12px}}
 
-.chat-shell{display:flex;flex-direction:column;height:min(72vh,760px);min-height:520px;overflow:hidden;padding:0}
-.chat-head{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:1px solid var(--line);gap:12px}
-.chat-head-copy{display:flex;align-items:center;gap:10px}.chat-head-copy b{font-size:16px}.chat-online-dot{width:9px;height:9px;border-radius:50%;background:#738493;box-shadow:0 0 0 4px rgba(115,132,147,.12)}
-.chat-messages{flex:1;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:10px;scroll-behavior:smooth}
-.chat-day{text-align:center;font-size:12px;color:var(--muted);margin:6px 0}
-.chat-msg{max-width:min(78%,620px);align-self:flex-start;background:var(--surface-2,#eef2f5);border:1px solid var(--line);border-radius:16px 16px 16px 5px;padding:9px 12px;box-shadow:0 2px 8px rgba(25,43,55,.04)}
-.chat-msg.mine{align-self:flex-end;background:rgba(57,102,132,.13);border-radius:16px 16px 5px 16px}
-.chat-author{font-size:14px;font-weight:800;color:#7f9fba;margin-bottom:5px}.chat-text{font-size:17px;font-weight:500;color:#e7edf2;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.48}.chat-time{font-size:12px;color:#9eabb5;text-align:right;margin-top:6px}
-.chat-msg:not(.mine){background:#252b31;border-color:#39434b}.chat-msg.mine{background:#304254;border-color:#48647b}.chat-msg.mine .chat-author{color:#b8cee0}.chat-msg.mine .chat-text{color:#f2f6f8}.chat-msg.mine .chat-time{color:#b6c2cb}
-.chat-compose{display:flex;align-items:flex-end;gap:9px;padding:12px;border-top:1px solid var(--line);background:var(--surface,#fff)}
-.chat-compose textarea{min-height:44px;max-height:120px;resize:none;flex:1;border-radius:14px;padding:11px 13px}.chat-compose button{height:44px;min-width:48px}
-.chat-empty{text-align:center;margin:auto;color:var(--muted);padding:30px}.chat-unread{display:inline-flex;min-width:18px;height:18px;padding:0 5px;align-items:center;justify-content:center;border-radius:10px;background:#b44;color:white;font-size:11px;font-weight:800;margin-left:auto}
-@media(max-width:700px){.chat-shell{height:calc(100dvh - 190px);min-height:440px}.chat-msg{max-width:88%}.chat-messages{padding:12px}.chat-compose{padding:9px}}
+.chat-shell{display:flex;flex-direction:column;height:calc(100dvh - 150px);min-height:580px;overflow:hidden;padding:0;border-radius:22px;background:linear-gradient(180deg,#172027,#11181d);border:1px solid #33434f;box-shadow:0 18px 60px rgba(0,0,0,.22)}
+.chat-head{display:flex;align-items:center;justify-content:space-between;padding:13px 17px;border-bottom:1px solid #31404a;gap:12px;background:rgba(29,40,48,.94);backdrop-filter:blur(12px)}
+.chat-head-copy{display:flex;align-items:center;gap:11px}.chat-avatar{width:42px;height:42px;border-radius:50%;display:grid;place-items:center;background:#496d87;color:#f5f8fa;font-weight:900;font-size:16px;box-shadow:inset 0 0 0 1px rgba(255,255,255,.1)}.chat-head-copy b{font-size:16px;color:#eef4f7}.chat-online-dot{width:8px;height:8px;border-radius:50%;background:#6f93ad;box-shadow:0 0 0 4px rgba(111,147,173,.12)}
+.chat-messages{flex:1;overflow:auto;padding:18px max(14px,calc((100% - 900px)/2));display:flex;flex-direction:column;gap:7px;scroll-behavior:smooth;background:radial-gradient(circle at 20% 10%,rgba(74,108,132,.09),transparent 30%),radial-gradient(circle at 80% 80%,rgba(65,83,96,.08),transparent 28%)}
+.chat-day{align-self:center;font-size:11px;color:#c3ced5;background:#26343e;border:1px solid #3a4b57;border-radius:999px;padding:4px 9px;margin:8px 0}
+.chat-row{display:flex;gap:8px;align-items:flex-end;max-width:min(82%,680px)}.chat-row.mine{align-self:flex-end;flex-direction:row-reverse}.chat-row.other{align-self:flex-start}.chat-mini-avatar{width:30px;height:30px;border-radius:50%;flex:0 0 30px;display:grid;place-items:center;background:#3e596d;color:#eef5f8;font-size:11px;font-weight:900}
+.chat-msg{max-width:100%;background:#27343d;border:1px solid #3b4b56;border-radius:18px 18px 18px 6px;padding:8px 12px 7px;box-shadow:0 3px 12px rgba(0,0,0,.13)}.chat-row.mine .chat-msg{background:#35546a;border-color:#486b83;border-radius:18px 18px 6px 18px}
+.chat-author{font-size:12px;font-weight:850;color:#9fc0d6;margin-bottom:3px}.chat-text{font-size:16px;font-weight:500;color:#f0f4f6;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.42}.chat-time{font-size:10px;color:#aab8c1;text-align:right;margin-top:3px}.chat-row.mine .chat-time{color:#c0d0da}
+.chat-compose{display:flex;align-items:flex-end;gap:9px;padding:10px max(12px,calc((100% - 920px)/2));border-top:1px solid #31404a;background:#1b252c}.chat-compose textarea{min-height:46px;max-height:130px;resize:none;flex:1;border-radius:18px!important;padding:12px 15px!important;background:#26343d!important;border:1px solid #40515d!important;color:#f1f5f7!important;font-size:16px}.chat-compose textarea::placeholder{color:#8999a4}.chat-send{width:46px!important;min-width:46px!important;height:46px!important;border-radius:50%!important;padding:0!important;display:grid!important;place-items:center;font-size:19px;background:#4e7692!important;box-shadow:0 5px 18px rgba(35,68,91,.32)}
+.chat-empty{text-align:center;margin:auto;color:#95a6b1;padding:30px}.chat-unread{position:absolute;top:4px;right:calc(50% - 27px);display:inline-flex;min-width:19px;height:19px;padding:0 5px;align-items:center;justify-content:center;border-radius:10px;background:#d14f55;color:#fff;font-size:11px;font-weight:900;border:2px solid var(--surface,#171d21);box-sizing:content-box}.navbtn[data-p="chat"]{position:relative;border:1px solid rgba(95,139,170,.32);background:rgba(67,104,130,.12)}.navbtn[data-p="chat"] svg{color:#78a8c8}.navbtn[data-p="chat"] span{font-weight:800}
+#mobileNav button[data-p="chat"]{position:relative}#mobileNav button[data-p="chat"] svg{width:26px;height:26px;stroke-width:2.2;color:#79a9c9}#mobileNav button[data-p="chat"] span{font-weight:900;color:#dbe9f2}#mobileNav button[data-p="chat"].on{background:rgba(76,117,146,.18);border-radius:14px}
+.chat-notify-on{background:#35546a!important;border-color:#547994!important;color:#fff!important}
+@media(max-width:700px){.content:has(.chat-shell){padding:6px 8px 0!important}.content:has(.chat-shell)>.page-heading{margin:2px 4px 8px}.chat-shell{height:calc(100dvh - 158px);min-height:0;border-radius:17px}.chat-messages{padding:12px 8px}.chat-row{max-width:91%}.chat-text{font-size:16px}.chat-compose{padding:8px}.chat-head{padding:10px 12px}.chat-avatar{width:38px;height:38px}.chat-mini-avatar{width:27px;height:27px;flex-basis:27px}}
 </style>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
@@ -25987,7 +25987,7 @@ input:not([type=checkbox]):not([type=radio]),select,textarea{min-width:0;max-wid
 </div><div id="modalRoot"></div>
 <script>
 (function(){
-var state={me:null,page:'dashboard',students:[],date:new Date().toISOString().slice(0,10),month:new Date().toISOString().slice(0,7)};
+var state={me:null,page:'dashboard',students:[],date:new Date().toISOString().slice(0,10),month:new Date().toISOString().slice(0,7),chatUnread:0,chatLastSeen:Number(localStorage.getItem('chatLastSeen')||0),chatWatch:null};
 var nav=[
  ['dashboard','🏠','Главная'],['journal','👥','Журнал'],['pairs','📚','По парам'],['students','👤','Студенты'],['lineup','📢','Линейка'],['classhour','🧑‍🏫','Классный час'],['meals','🍽️','Питание'],
  ['calendar','📅','Календарь'],['health','🤒','Болезни и заявления'],['duty','🧹','Дежурство'],
@@ -26001,8 +26001,8 @@ function esc(x){return String(x==null?'':x).replace(/[&<>"']/g,function(c){retur
 async function api(path,opt){opt=opt||{};opt.headers=Object.assign({'content-type':'application/json'},opt.headers||{});var r=await fetch(path,opt);var ct=r.headers.get('content-type')||'';if(r.status===401){showAuth();throw new Error('Нужен вход')}if(!r.ok){var e=ct.includes('json')?await r.json():{error:await r.text()};throw new Error(e.error||'Ошибка')}return ct.includes('json')?r.json():r}
 function toast(t){document.querySelectorAll('.toast').forEach(function(x){x.remove()});var d=document.createElement('div');d.className='toast';d.setAttribute('role','status');d.textContent=t;document.body.appendChild(d);setTimeout(function(){d.remove()},2200)}
 function fmtDate(d){try{return new Date(d+'T12:00:00').toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'})}catch(e){return d}}
-function showAuth(){state.me=null;state.refreshPresence=null;document.getElementById('auth').classList.remove('hidden');document.getElementById('shell').classList.add('hidden')}
-function showShell(){document.getElementById('auth').classList.add('hidden');document.getElementById('shell').classList.remove('hidden');renderNav();go('dashboard');presencePulse()}
+function showAuth(){state.me=null;if(state.chatWatch){clearInterval(state.chatWatch);state.chatWatch=null}state.refreshPresence=null;document.getElementById('auth').classList.remove('hidden');document.getElementById('shell').classList.add('hidden')}
+function showShell(){document.getElementById('auth').classList.add('hidden');document.getElementById('shell').classList.remove('hidden');renderNav();go('dashboard');presencePulse();startChatWatch()}
 var iconPaths={
  dashboard:'<rect x="3" y="3" width="7" height="7" rx="2"/><rect x="14" y="3" width="7" height="7" rx="2"/><rect x="3" y="14" width="7" height="7" rx="2"/><rect x="14" y="14" width="7" height="7" rx="2"/>',
  journal:'<path d="M8 3h10a2 2 0 0 1 2 2v16H8a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3Z"/><path d="M5 17h15M9 7h7M9 11h5"/>',
@@ -26046,6 +26046,7 @@ function renderNav(){
  var mobile=nav.filter(function(n){return labels[n[0]]&&canPage(n[0])}).map(function(n){return '<button data-p="'+n[0]+'" class="'+(state.page===n[0]?'on':'')+'" '+(state.page===n[0]?'aria-current="page"':'')+'>'+icon(n[0])+'<span>'+labels[n[0]]+'</span></button>'}).join('');
  mobile+='<button id="mobileMore" class="'+(!labels[state.page]?'on':'')+'" aria-label="Все разделы">'+icon('more')+'<span>Ещё</span></button>';
  document.getElementById('mobileNav').innerHTML=mobile;
+ document.querySelectorAll('#sideNav [data-p="chat"],#mobileNav [data-p="chat"]').forEach(function(b){if(state.chatUnread>0){var x=document.createElement('i');x.className='chat-unread';x.textContent=state.chatUnread>99?'99+':state.chatUnread;b.appendChild(x)}});
  document.querySelectorAll('#sideNav [data-p],#mobileNav [data-p]').forEach(function(b){b.onclick=function(){go(b.dataset.p)}});
  document.getElementById('mobileMore').onclick=openMoreMenu;
  var account=state.me.display_name||state.me.name||state.me.login||'Аккаунт';
@@ -26105,6 +26106,18 @@ function modal(html){
 }
 function closeModal(){document.getElementById('modalRoot').innerHTML='';document.body.style.overflow=modalOverflow;document.getElementById('shell').inert=false;if(modalFocus&&modalFocus.isConnected)modalFocus.focus({preventScroll:true})}
 function openMoreMenu(){var allowed=nav.filter(function(n){return !['dashboard','journal','pairs','students'].includes(n[0])&&canPage(n[0])});modal('<h3>Все разделы</h3><p class="modal-sub">Инструменты вашей группы</p><div class="more-list">'+allowed.map(function(n){return '<button class="list-item" data-more="'+n[0]+'">'+icon(n[0])+'<b>'+n[2]+'</b></button>'}).join('')+'</div><button class="btn ghost" id="moreLogout" style="margin-top:20px;width:100%">Выйти из аккаунта</button>');document.querySelectorAll('[data-more]').forEach(function(b){b.onclick=function(){closeModal();go(b.dataset.more)}});document.getElementById('moreLogout').onclick=function(){document.getElementById('logout').click()}}
+async function chatWatchPulse(){
+ if(!state.me)return;
+ try{
+   var d=await api('/api/chat?after='+(state.chatLastSeen||0),{cache:'no-store'}),rows=(d.messages||[]).filter(function(x){return !Number(x.mine)});
+   if(rows.length&&state.page!=='chat'){
+     state.chatUnread=Math.min(999,(state.chatUnread||0)+rows.length);
+     var newest=rows[rows.length-1];state.chatLastSeen=Math.max(state.chatLastSeen||0,...rows.map(function(x){return Number(x.id)||0}));localStorage.setItem('chatLastSeen',String(state.chatLastSeen));renderNav();
+     if('Notification'in window&&Notification.permission==='granted'){try{new Notification((newest.author||'Журнал 102'),{body:newest.message||'Новое сообщение',tag:'journal102-chat'})}catch(_){}}
+   }
+ }catch(_){}
+}
+function startChatWatch(){if(state.chatWatch)clearInterval(state.chatWatch);chatWatchPulse();state.chatWatch=setInterval(chatWatchPulse,5000)}
 function localToday(){var parts=new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Chisinau',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());var p={};parts.forEach(function(x){p[x.type]=x.value});return p.year+'-'+p.month+'-'+p.day}
 function dateControls(id){return '<div class="date-controls"><button class="btn ghost icon-btn" id="prevDate" aria-label="Предыдущий день">'+icon('left')+'</button><input type="date" id="'+id+'" aria-label="Дата журнала" value="'+state.date+'"><button class="btn ghost icon-btn" id="nextDate" aria-label="Следующий день">'+icon('right')+'</button><button class="btn secondary today-btn" id="todayDate">Сегодня</button></div>'}
 function bindDates(id,page){document.getElementById(id).onchange=function(){if(this.value){state.date=this.value;go(page)}};[-1,1].forEach(function(dir){document.getElementById(dir<0?'prevDate':'nextDate').onclick=function(){var dt=new Date(state.date+'T12:00:00Z');dt.setUTCDate(dt.getUTCDate()+dir);state.date=dt.toISOString().slice(0,10);go(page)}});document.getElementById('todayDate').onclick=function(){state.date=localToday();go(page)}}
@@ -26558,48 +26571,39 @@ pages.reports=async function(c){
 function presenceAgo(value,now){var stamp=Date.parse(value||'');if(!Number.isFinite(stamp)||stamp>now+30000)return 'Нет данных об активности';var age=Math.max(0,now-stamp);if(age<60000)return 'Активность только что';if(age<3600000)return 'Активность '+Math.floor(age/60000)+' мин. назад';if(age<86400000)return 'Активность '+Math.floor(age/3600000)+' ч. назад';return 'Последняя активность: '+new Date(stamp).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})}
 
 pages.chat=async function(c){
- var lastId=0,loading=false,timer=null,first=true;
- c.innerHTML=pageHeading('Общий чат','Для сотрудников журнала','<button class="btn secondary" id="chatNotify">🔔 Уведомления</button>')+
- '<section class="card chat-shell"><div class="chat-head"><div class="chat-head-copy"><span class="chat-online-dot"></span><div><b>Группа 102</b><div class="small muted">Общий чат</div></div></div><span class="small muted" id="chatStatus">Подключаемся…</span></div>'+
+ var lastId=0,loading=false,timer=null,first=true,lastDay='';
+ state.chatUnread=0;renderNav();
+ c.innerHTML=pageHeading('Чат','Общий чат группы 102','<button class="btn secondary" id="chatNotify">🔔 Уведомления</button>')+
+ '<section class="card chat-shell"><div class="chat-head"><div class="chat-head-copy"><div class="chat-avatar">102</div><div><b>Группа 102</b><div class="small muted"><span class="chat-online-dot" style="display:inline-block;margin-right:7px"></span>учителя и администрация</div></div></div><span class="small muted" id="chatStatus">Подключаемся…</span></div>'+
  '<div class="chat-messages" id="chatMessages"><div class="chat-empty">Загружаем сообщения…</div></div>'+
- '<form class="chat-compose" id="chatForm"><textarea id="chatInput" maxlength="1500" rows="1" placeholder="Сообщение…" aria-label="Сообщение"></textarea><button class="btn" type="submit" aria-label="Отправить">➤</button></form></section>';
- var box=c.querySelector('#chatMessages'),input=c.querySelector('#chatInput'),status=c.querySelector('#chatStatus');
+ '<form class="chat-compose" id="chatForm"><textarea id="chatInput" maxlength="1500" rows="1" placeholder="Сообщение" aria-label="Сообщение"></textarea><button class="btn chat-send" type="submit" aria-label="Отправить">➤</button></form></section>';
+ var box=c.querySelector('#chatMessages'),input=c.querySelector('#chatInput'),status=c.querySelector('#chatStatus'),notify=c.querySelector('#chatNotify');
+ function notifState(){if(!('Notification'in window)){notify.textContent='🔕 Не поддерживается';notify.disabled=true;return}notify.textContent=Notification.permission==='granted'?'🔔 Включены':'🔔 Уведомления';notify.classList.toggle('chat-notify-on',Notification.permission==='granted')}
+ notifState();
+ function dayLabel(iso){var d=new Date(iso),now=new Date(),y=new Date();y.setDate(now.getDate()-1);var key=d.toLocaleDateString('ru-RU');if(key===now.toLocaleDateString('ru-RU'))return'Сегодня';if(key===y.toLocaleDateString('ru-RU'))return'Вчера';return d.toLocaleDateString('ru-RU',{day:'numeric',month:'long'})}
  function render(rows,append){
-   if(!append)box.innerHTML='';
-   if(!rows.length&&!append){box.innerHTML='<div class="chat-empty">Пока тихо. Напиши первое сообщение 👋</div>';return}
+   if(!append){box.innerHTML='';lastDay=''}
+   if(!rows.length&&!append){box.innerHTML='<div class="chat-empty"><b>Здесь пока тихо</b><div style="margin-top:6px">Напиши первое сообщение 👋</div></div>';return}
    rows.forEach(function(m){
-     var el=document.createElement('article');el.className='chat-msg'+(Number(m.mine)?' mine':'');
-     el.innerHTML='<div class="chat-author">'+esc(m.author||'Пользователь')+'</div><div class="chat-text">'+esc(m.message)+'</div><div class="chat-time">'+esc(m.time_text||'')+'</div>';
-     box.appendChild(el);lastId=Math.max(lastId,Number(m.id)||0);
+     var day=dayLabel(m.created_at);if(day!==lastDay){var sep=document.createElement('div');sep.className='chat-day';sep.textContent=day;box.appendChild(sep);lastDay=day}
+     var row=document.createElement('div');row.className='chat-row '+(Number(m.mine)?'mine':'other');
+     var av=Number(m.mine)?'':('<div class="chat-mini-avatar">'+esc(initials(m.author||'?'))+'</div>');
+     row.innerHTML=av+'<article class="chat-msg">'+(Number(m.mine)?'':'<div class="chat-author">'+esc(m.author||'Пользователь')+'</div>')+'<div class="chat-text">'+esc(m.message)+'</div><div class="chat-time">'+esc(m.time_text||'')+'</div></article>';
+     box.appendChild(row);lastId=Math.max(lastId,Number(m.id)||0);
    });
  }
  async function load(){
    if(loading||!c.isConnected||state.page!=='chat')return;loading=true;
-   try{
-     var d=await api('/api/chat?after='+(first?0:lastId),{cache:'no-store'}),rows=d.messages||[];
-     var nearBottom=box.scrollHeight-box.scrollTop-box.clientHeight<100;
-     render(rows,!first);status.textContent='Обновлено '+new Date().toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
-     if(first||nearBottom)box.scrollTop=box.scrollHeight;
-     if(!first&&rows.some(function(x){return !Number(x.mine)})&&document.hidden){
-       try{if(Notification.permission==='granted')new Notification('Журнал 102 · новое сообщение',{body:(rows.filter(function(x){return !Number(x.mine)}).pop()||{}).message||'Новое сообщение'})}catch(_){}
-     }
-     first=false;
-   }catch(e){status.textContent='Нет связи'}finally{loading=false}
+   try{var d=await api('/api/chat?after='+(first?0:lastId),{cache:'no-store'}),rows=d.messages||[],near=box.scrollHeight-box.scrollTop-box.clientHeight<130;render(rows,!first);status.textContent='в сети';if(first||near)box.scrollTop=box.scrollHeight;if(lastId){state.chatLastSeen=lastId;localStorage.setItem('chatLastSeen',String(lastId))}first=false}
+   catch(e){status.textContent='нет связи'}finally{loading=false}
  }
- c.querySelector('#chatForm').onsubmit=async function(e){
-   e.preventDefault();var text=input.value.trim();if(!text)return;var b=this.querySelector('button');b.disabled=true;
-   try{await api('/api/chat',{method:'POST',body:JSON.stringify({message:text})});input.value='';input.style.height='auto';await load();box.scrollTop=box.scrollHeight}catch(e){toast(e.message)}finally{b.disabled=false;input.focus()}
- };
- input.oninput=function(){this.style.height='auto';this.style.height=Math.min(this.scrollHeight,120)+'px'};
+ c.querySelector('#chatForm').onsubmit=async function(e){e.preventDefault();var text=input.value.trim();if(!text)return;var b=this.querySelector('button');b.disabled=true;try{await api('/api/chat',{method:'POST',body:JSON.stringify({message:text})});input.value='';input.style.height='auto';await load();box.scrollTop=box.scrollHeight}catch(e){toast(e.message)}finally{b.disabled=false;input.focus()}};
+ input.oninput=function(){this.style.height='auto';this.style.height=Math.min(this.scrollHeight,130)+'px'};
  input.onkeydown=function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();c.querySelector('#chatForm').requestSubmit()}};
- c.querySelector('#chatNotify').onclick=async function(){
-   if(!('Notification' in window)){toast('Этот браузер не поддерживает уведомления');return}
-   var p=await Notification.requestPermission();toast(p==='granted'?'Уведомления включены':'Разрешение на уведомления не выдано');
- };
- await load();timer=setInterval(load,4000);
- var oldObserver=new MutationObserver(function(){if(!c.isConnected){clearInterval(timer);oldObserver.disconnect()}});oldObserver.observe(document.body,{childList:true,subtree:true});
+ notify.onclick=async function(){if(!('Notification'in window))return;var p=await Notification.requestPermission();notifState();toast(p==='granted'?'Уведомления включены 🔔':'Браузер не разрешил уведомления')};
+ await load();timer=setInterval(load,3000);
+ var obs=new MutationObserver(function(){if(!c.isConnected){clearInterval(timer);obs.disconnect()}});obs.observe(document.body,{childList:true,subtree:true});
 };
-
 pages.online=async function(c){
  var loading=false;
  c.innerHTML=pageHeading('Кто в системе','Зелёный — в сети · серый — не в сети','<button class="btn secondary" id="refreshOnline">'+icon('online')+'Обновить</button>')+'<div class="presence-summary"><span class="pill" id="onlineCount" aria-live="polite">Проверяем статус…</span><span class="small muted" id="onlineUpdated">Автообновление каждые 30 секунд</span></div><div id="onlineRows" class="presence-list"></div><p class="small muted presence-hint" id="onlineHint"></p>';
