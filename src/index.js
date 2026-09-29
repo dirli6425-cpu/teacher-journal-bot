@@ -21470,6 +21470,25 @@ async function rememberUser(env, user) {
   `).bind(String(user.id), user.first_name || "", user.last_name || "", user.username || "", (/* @__PURE__ */ new Date()).toISOString()).run();
 }
 __name(rememberUser, "rememberUser");
+var telegramLinksReady = false;
+async function ensureTelegramLinksTable(env) {
+  if (telegramLinksReady) return;
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS web_account_telegram_links (
+      telegram_user_id TEXT PRIMARY KEY,
+      account_id INTEGER NOT NULL,
+      label TEXT,
+      created_at TEXT NOT NULL
+    )`).run();
+  telegramLinksReady = true;
+}
+__name(ensureTelegramLinksTable, "ensureTelegramLinksTable");
+async function linkedWebAccountByTelegram(env, userId) {
+  await ensureTelegramLinksTable(env);
+  return await env.DB.prepare(`SELECT a.* FROM web_account_telegram_links l
+      JOIN web_accounts a ON a.id=l.account_id
+      WHERE l.telegram_user_id=? AND a.enabled=1 LIMIT 1`).bind(String(userId)).first();
+}
+__name(linkedWebAccountByTelegram, "linkedWebAccountByTelegram");
 function isOwner(env, userId) {
   return String(userId) === String(env.ADMIN_ID);
 }
@@ -21478,6 +21497,8 @@ async function isAdmin(env, userId) {
   if (isOwner(env, userId)) {
     return true;
   }
+  const linked = await linkedWebAccountByTelegram(env, userId).catch(() => null);
+  if (linked && linked.role === "owner") return true;
   const row = await env.DB.prepare(`
       SELECT user_id
       FROM admins
@@ -26844,10 +26865,21 @@ c.innerHTML='<div class="page-heading"><div><h2>Пользователи</h2><p>
 '<div class="list">'+d.accounts.map(function(u){
  return '<div class="list-item"><div style="flex:1"><b>'+esc(u.display_name||u.login||u.telegram_user_id||'Аккаунт')+'</b>'+
  '<div class="small muted">'+esc(u.login||'без логина')+' · '+esc(({owner:'Владелец',teacher:'Преподаватель',viewer:'Просмотр'})[u.role]||u.role)+' · '+(Number(u.enabled)?'активен':'отключён')+
- (u.telegram_user_id?' · TG '+esc(u.telegram_user_id):'')+'</div></div>'+
- (u.role!=='owner'?'<div class="actions"><button class="btn secondary" data-edit="'+u.id+'">✏️ Изменить</button><button class="btn secondary" data-toggle="'+u.id+'" data-enabled="'+Number(u.enabled)+'">'+(Number(u.enabled)?'Отключить':'Включить')+'</button></div>':'<span class="pill">Владелец</span>')+
+ (u.telegram_user_id?' · TG '+esc(u.telegram_user_id):'')+((u.telegram_links||[]).length?' · +'+(u.telegram_links||[]).length+' TG':'')+'</div></div>'+
+ (u.role!=='owner'?'<div class="actions"><button class="btn secondary" data-edit="'+u.id+'">✏️ Изменить</button><button class="btn secondary" data-toggle="'+u.id+'" data-enabled="'+Number(u.enabled)+'">'+(Number(u.enabled)?'Отключить':'Включить')+'</button></div>':'<div class="actions"><button class="btn secondary" data-owner-tg="'+u.id+'">📱 Telegram</button><span class="pill">Владелец</span></div>')+
  '</div>';
 }).join('')+'</div>';
+
+document.querySelectorAll('[data-owner-tg]').forEach(function(b){
+ b.onclick=function(){
+   var id=Number(b.dataset.ownerTg),u=(d.accounts||[]).find(function(x){return Number(x.id)===id});if(!u)return;
+   function linksHtml(){var links=u.telegram_links||[];return links.length?links.map(function(x){return '<div class="list-item"><div style="flex:1"><b>'+esc(x.label||'Дополнительный Telegram')+'</b><div class="small muted">TG '+esc(x.telegram_user_id)+'</div></div><button class="btn secondary" data-unlink-tg="'+esc(x.telegram_user_id)+'">Удалить</button></div>'}).join(''):'<div class="small muted">Дополнительных Telegram пока нет.</div>'}
+   modal('<h3>📱 Telegram владельца</h3><p class="modal-sub">Основной: TG '+esc(u.telegram_user_id||'не указан')+'. Дополнительные аккаунты входят с теми же правами владельца.</p><div id="ownerTgLinks" class="list">'+linksHtml()+'</div><div class="field" style="margin-top:16px"><label>Telegram ID второго аккаунта</label><input id="ownerTgId" inputmode="numeric" placeholder="Например: 123456789"><div class="small muted">На втором аккаунте отправь боту /myid — он покажет ID.</div></div><div class="field"><label>Название — необязательно</label><input id="ownerTgLabel" placeholder="Например: Второй аккаунт"></div><div id="ownerTgError" class="small" style="color:#ffbe55;margin-top:8px"></div><button class="btn" id="ownerTgAdd" style="width:100%;margin-top:12px">+ Привязать Telegram</button>');
+   function bindRemove(){document.querySelectorAll('[data-unlink-tg]').forEach(function(x){x.onclick=async function(){if(!confirm('Отвязать этот Telegram от владельца?'))return;try{await api('/api/admin/owner-telegram/delete',{method:'POST',body:JSON.stringify({telegram_user_id:x.dataset.unlinkTg})});toast('Telegram отвязан');closeModal();go('users')}catch(e){toast(e.message)}}})}
+   bindRemove();
+   document.getElementById('ownerTgAdd').onclick=async function(){var tg=document.getElementById('ownerTgId').value.trim(),label=document.getElementById('ownerTgLabel').value.trim(),err=document.getElementById('ownerTgError');err.textContent='';if(!/^\d{5,20}$/.test(tg)){err.textContent='⚠️ Telegram ID — только цифры';return}this.disabled=true;try{await api('/api/admin/owner-telegram/add',{method:'POST',body:JSON.stringify({telegram_user_id:tg,label:label})});toast('Telegram привязан к владельцу');closeModal();go('users')}catch(e){err.textContent='⚠️ '+e.message;this.disabled=false}};
+ };
+});
 
 document.getElementById('newAccount').onclick=function(){
  modal('<h3>Создать пользователя</h3>'+
@@ -27174,6 +27206,7 @@ async function initWebDb(env) {
         created_at TEXT NOT NULL,
         read_at TEXT
     )`).run();
+  await ensureTelegramLinksTable(env);
   await ensureColumn(env, "web_accounts", "display_name", "TEXT");
   await ensureColumn(env, "web_accounts", "password_salt", "TEXT");
   await ensureColumn(env, "web_accounts", "permissions_json", "TEXT");
@@ -27371,6 +27404,8 @@ async function telegramWebAppUser(initData, env) {
 __name(telegramWebAppUser, "telegramWebAppUser");
 async function ensureTelegramAccount(env, tg) {
   const uid = String(tg.id);
+  const linked = await linkedWebAccountByTelegram(env, uid).catch(() => null);
+  if (linked) return linked;
   const allowed = await isAdmin(env, uid);
   if (!allowed) return null;
   let a = await env.DB.prepare(`SELECT * FROM web_accounts WHERE telegram_user_id=?`).bind(uid).first();
@@ -28463,7 +28498,35 @@ async function handleWebApi(request, env, url, ctx) {
     }
     if (path === "/api/admin/accounts" && request.method === "GET") {
       if (user.role !== "owner") return jsonResponse({ error: "\u0422\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u0430\u0434\u0435\u043B\u0435\u0446" }, 403);
-      return jsonResponse({ accounts: (await env.DB.prepare(`SELECT id,telegram_user_id,login,role,enabled,display_name,last_login,permissions_json FROM web_accounts ORDER BY id`).all()).results || [] });
+      await ensureTelegramLinksTable(env);
+      const accounts = (await env.DB.prepare(`SELECT id,telegram_user_id,login,role,enabled,display_name,last_login,permissions_json FROM web_accounts ORDER BY id`).all()).results || [];
+      const links = (await env.DB.prepare(`SELECT telegram_user_id,account_id,label,created_at FROM web_account_telegram_links ORDER BY created_at`).all()).results || [];
+      for (const a of accounts) a.telegram_links = links.filter(l => Number(l.account_id) === Number(a.id));
+      return jsonResponse({ accounts });
+    }
+    if (path === "/api/admin/owner-telegram/add" && request.method === "POST") {
+      if (user.role !== "owner") return jsonResponse({ error: "\u0422\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u0430\u0434\u0435\u043B\u0435\u0446" }, 403);
+      await ensureTelegramLinksTable(env);
+      const tg = String(body.telegram_user_id || "").trim();
+      const label = String(body.label || "\u0412\u0442\u043E\u0440\u043E\u0439 Telegram").trim().slice(0, 60);
+      if (!/^\d{5,20}$/.test(tg)) return jsonResponse({ error: "Telegram ID должен состоять только из цифр" }, 400);
+      if (tg === String(user.telegram_user_id || "")) return jsonResponse({ error: "Это уже основной Telegram владельца" }, 409);
+      const direct = await env.DB.prepare(`SELECT id,role FROM web_accounts WHERE telegram_user_id=?`).bind(tg).first();
+      if (direct) return jsonResponse({ error: direct.id === user.id ? "Этот Telegram уже привязан" : "Этот Telegram ID уже принадлежит другому пользователю" }, 409);
+      const existing = await env.DB.prepare(`SELECT account_id FROM web_account_telegram_links WHERE telegram_user_id=?`).bind(tg).first();
+      if (existing) return jsonResponse({ error: Number(existing.account_id) === Number(user.id) ? "Этот Telegram уже привязан" : "Этот Telegram ID уже привязан к другому аккаунту" }, 409);
+      await env.DB.prepare(`INSERT INTO web_account_telegram_links(telegram_user_id,account_id,label,created_at) VALUES(?,?,?,?)`)
+        .bind(tg, user.id, label || "Второй Telegram", new Date().toISOString()).run();
+      await webAudit(env, user, "owner_telegram_add", tg);
+      return jsonResponse({ ok: true });
+    }
+    if (path === "/api/admin/owner-telegram/delete" && request.method === "POST") {
+      if (user.role !== "owner") return jsonResponse({ error: "\u0422\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u0430\u0434\u0435\u043B\u0435\u0446" }, 403);
+      await ensureTelegramLinksTable(env);
+      const tg = String(body.telegram_user_id || "").trim();
+      await env.DB.prepare(`DELETE FROM web_account_telegram_links WHERE telegram_user_id=? AND account_id=?`).bind(tg, user.id).run();
+      await webAudit(env, user, "owner_telegram_delete", tg);
+      return jsonResponse({ ok: true });
     }
     if (path === "/api/admin/accounts" && request.method === "POST") {
       if (user.role !== "owner") return jsonResponse({ error: "\u0422\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u0430\u0434\u0435\u043B\u0435\u0446" }, 403);
