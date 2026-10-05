@@ -21221,13 +21221,13 @@ ${JSON.stringify(result)}`);
           // Activate the new mandatory update only after a production APK, signed
           // with the existing application's key, has been uploaded to this URL.
           // Publish code 21 only after uploading the matching APK: set ANDROID_VERSION_CODE=21 and ANDROID_VERSION_NAME=2.2.4.
-          versionCode: env.ANDROID_APK_URL ? (Number(env.ANDROID_VERSION_CODE) || 20) : 16,
-          versionName: env.ANDROID_APK_URL ? String(env.ANDROID_VERSION_NAME || "2.2.3") : "2.1.3",
+          versionCode: 21,
+          versionName: "2.2.4",
           required: true,
           notes: env.ANDROID_APK_URL
             ? "Доступно обновление Журнала 102."
             : "Текущая опубликованная версия Журнала 102.",
-          apkUrl: env.ANDROID_APK_URL || "https://github.com/dirli6425-cpu/teacher-journal-bot/releases/download/2.1.3/app-debug.apk"
+          apkUrl: env.ANDROID_APK_URL || "https://github.com/dirli6425-cpu/teacher-journal-bot/releases/download/2.2.4/app-debug.apk"
         });
       }
       if (request.method === "GET" && url.pathname === "/android/latest.apk") {
