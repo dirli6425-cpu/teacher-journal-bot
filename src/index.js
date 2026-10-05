@@ -21199,19 +21199,9 @@ var index_default = {
     if(request.method==='GET'&&url.pathname==='/firebase-messaging-sw.js')return new Response(CHAT_PUSH_SW.replace('__PUSH_CONFIG__',JSON.stringify(PUSH_WEB_CONFIG)),{headers:{'content-type':'application/javascript; charset=utf-8','cache-control':'no-cache','service-worker-allowed':'/'}});
     if(request.method==='GET'&&url.pathname==='/push-icon.svg')return new Response('<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192"><rect width="192" height="192" rx="44" fill="#364558"/><path d="M44 42h104v80H88l-44 30z" fill="#e4e6eb"/><path d="M65 70h62M65 92h44" stroke="#364558" stroke-width="9"/></svg>',{headers:{'content-type':'image/svg+xml','cache-control':'public,max-age=86400'}});
     try {
-      // IMPORTANT: do not run database migrations on every HTTP request.
-      // The old code executed dozens of CREATE/PRAGMA/UPDATE queries before
-      // even routing /api/me or /api/chat, which can exhaust Workers CPU.
-      if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/app")) {
-        // Origin persistence is not request-critical; keep it off the hot API path.
-        const remember = rememberWebOrigin(env, url.origin).catch(() => {});
-        if (ctx && ctx.waitUntil) ctx.waitUntil(remember);
-      }
+      await initDb(env);
+      await rememberWebOrigin(env, url.origin);
       if (request.method === "GET" && url.pathname === "/setup") {
-        // Schema/bootstrap work is allowed only on the explicit setup route.
-        await initDb(env);
-        await initPushDb(env);
-        await rememberWebOrigin(env, url.origin);
         const webhookUrl = `${url.origin}/webhook`;
         const result = await telegram(env, "setWebhook", {
           url: webhookUrl,
@@ -21230,14 +21220,14 @@ ${JSON.stringify(result)}`);
         return jsonResponse({
           // Activate the new mandatory update only after a production APK, signed
           // with the existing application's key, has been uploaded to this URL.
-          // Publish code 20 only after uploading the matching APK: set ANDROID_VERSION_CODE=20 and ANDROID_VERSION_NAME=2.2.3.
-          versionCode: env.ANDROID_APK_URL ? (Number(env.ANDROID_VERSION_CODE) || 16) : 20,
-          versionName: env.ANDROID_APK_URL ? String(env.ANDROID_VERSION_NAME || "2.1.3") : "2.2.3",
+          // Publish code 21 only after uploading the matching APK: set ANDROID_VERSION_CODE=21 and ANDROID_VERSION_NAME=2.2.4.
+          versionCode: env.ANDROID_APK_URL ? (Number(env.ANDROID_VERSION_CODE) || 20) : 16,
+          versionName: env.ANDROID_APK_URL ? String(env.ANDROID_VERSION_NAME || "2.2.3") : "2.1.3",
           required: true,
           notes: env.ANDROID_APK_URL
             ? "Доступно обновление Журнала 102."
             : "Текущая опубликованная версия Журнала 102.",
-          apkUrl: env.ANDROID_APK_URL || "https://github.com/dirli6425-cpu/teacher-journal-bot/releases/download/2.2.3/app-debug.apk"
+          apkUrl: env.ANDROID_APK_URL || "https://github.com/dirli6425-cpu/teacher-journal-bot/releases/download/2.1.3/app-debug.apk"
         });
       }
       if (request.method === "GET" && url.pathname === "/android/latest.apk") {
@@ -21470,25 +21460,6 @@ async function rememberUser(env, user) {
   `).bind(String(user.id), user.first_name || "", user.last_name || "", user.username || "", (/* @__PURE__ */ new Date()).toISOString()).run();
 }
 __name(rememberUser, "rememberUser");
-var telegramLinksReady = false;
-async function ensureTelegramLinksTable(env) {
-  if (telegramLinksReady) return;
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS web_account_telegram_links (
-      telegram_user_id TEXT PRIMARY KEY,
-      account_id INTEGER NOT NULL,
-      label TEXT,
-      created_at TEXT NOT NULL
-    )`).run();
-  telegramLinksReady = true;
-}
-__name(ensureTelegramLinksTable, "ensureTelegramLinksTable");
-async function linkedWebAccountByTelegram(env, userId) {
-  await ensureTelegramLinksTable(env);
-  return await env.DB.prepare(`SELECT a.* FROM web_account_telegram_links l
-      JOIN web_accounts a ON a.id=l.account_id
-      WHERE l.telegram_user_id=? AND a.enabled=1 LIMIT 1`).bind(String(userId)).first();
-}
-__name(linkedWebAccountByTelegram, "linkedWebAccountByTelegram");
 function isOwner(env, userId) {
   return String(userId) === String(env.ADMIN_ID);
 }
@@ -21497,8 +21468,6 @@ async function isAdmin(env, userId) {
   if (isOwner(env, userId)) {
     return true;
   }
-  const linked = await linkedWebAccountByTelegram(env, userId).catch(() => null);
-  if (linked && linked.role === "owner") return true;
   const row = await env.DB.prepare(`
       SELECT user_id
       FROM admins
@@ -24739,16 +24708,16 @@ initDb = /* @__PURE__ */ __name(async function(env) {
     PRIMARY KEY(date,student_id)
   )`).run();
 }, "initDb");
-function lessonsCountForDate(date) {
+function normalizedLessonCount(date, value) {
   const day = dateWeekday(date);
-  const schedule = {
-    1: 3,
-    2: 4,
-    3: 4,
-    4: 3,
-    5: 4
-  };
-  return schedule[day] || 4;
+  if (day === 0 || day === 6) return 0;
+  const lessons = Number(value || 4);
+  return Math.max(1, Math.min(8, Number.isFinite(lessons) ? lessons : 4));
+}
+__name(normalizedLessonCount, "normalizedLessonCount");
+async function lessonsCountForDate(env, date) {
+  const saved = await env.DB.prepare(`SELECT lessons FROM day_lesson_counts WHERE date=?`).bind(date).first();
+  return normalizedLessonCount(date, saved?.lessons);
 }
 __name(lessonsCountForDate, "lessonsCountForDate");
 function pairStatusEmoji(status) {
@@ -24785,7 +24754,7 @@ async function getPairStatuses(env, date) {
 __name(getPairStatuses, "getPairStatuses");
 async function showPairsDay(env, chatId, messageId, date) {
   const students = await getActiveStudents(env);
-  const lessonCount = lessonsCountForDate(date);
+  const lessonCount = await lessonsCountForDate(env, date);
   const statuses = await getPairStatuses(env, date);
   const previous = previousWorkday(date);
   const next = nextWorkday(date);
@@ -24870,7 +24839,7 @@ async function showPairStudent(env, chatId, messageId, date, studentId) {
   if (!student) {
     return;
   }
-  const lessonCount = lessonsCountForDate(date);
+  const lessonCount = await lessonsCountForDate(env, date);
   const statuses = await getPairStatuses(env, date);
   let text = `\u{1F464} <b>${escapeHtml(student.name)}</b>
 
@@ -24981,7 +24950,7 @@ async function cyclePairStatus(env, date, lesson, studentId) {
 }
 __name(cyclePairStatus, "cyclePairStatus");
 async function markStudentLeft(env, date, leaveLesson, studentId) {
-  const lessonCount = lessonsCountForDate(date);
+  const lessonCount = await lessonsCountForDate(env, date);
   for (let lesson = 1; lesson <= lessonCount; lesson++) {
     let status;
     if (lesson < leaveLesson) {
@@ -25020,7 +24989,7 @@ async function markStudentLeft(env, date, leaveLesson, studentId) {
 __name(markStudentLeft, "markStudentLeft");
 async function showPairsSummary(env, chatId, messageId, date) {
   const students = await getActiveStudents(env);
-  const lessonCount = lessonsCountForDate(date);
+  const lessonCount = await lessonsCountForDate(env, date);
   const statuses = await getPairStatuses(env, date);
   let text = `\u{1F440} <b>\u041A\u0422\u041E \u0411\u042B\u041B \u041F\u041E \u041F\u0410\u0420\u0410\u041C</b>
 
@@ -25841,28 +25810,18 @@ handleExtraCallback = /* @__PURE__ */ __name(async function(data, env, chatId, m
     userId
   );
 }, "handleExtraCallback");
-// Journal 102 — Calm design 2.2.3; Android source versionCode 20.
+// Journal 102 — Calm design 2.2.4; Android source versionCode 21.
 // Firebase credentials are read only from a Cloudflare secret, never sent to clients.
 var PUSH_PROJECT = "journal102";
 var PUSH_WEB_CONFIG = {apiKey:"AIzaSyBiJWvKNMuUIHXgS4ZHoe8TRI-3Hk14EPM",authDomain:"journal102.firebaseapp.com",projectId:"journal102",storageBucket:"journal102.firebasestorage.app",messagingSenderId:"52462064879",appId:"1:52462064879:web:db80e6a0f22f4573b7f71a"};
 var PUSH_VAPID = "BD8k3GSEdVzc8zB-d40haWnACdknQX9sHzT_NrdjZd_qZ_KrWaRWjNmFbREKNRlzRH-kLtZbmF8CSC6Uc2b0-Mw";
 var pushOAuthCache = null;
-var chatDbInitPromise = null;
-async function ensureChatDb(env) {
-  if (chatDbInitPromise) return chatDbInitPromise;
-  chatDbInitPromise = env.DB.prepare(`CREATE TABLE IF NOT EXISTS web_chat_messages(id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER NOT NULL,author TEXT NOT NULL,message TEXT NOT NULL,created_at TEXT NOT NULL)`).run()
-    .catch((error) => { chatDbInitPromise = null; throw error; });
-  return chatDbInitPromise;
-}
-var pushDbInitPromise = null;
 async function initPushDb(env) {
-  if (pushDbInitPromise) return pushDbInitPromise;
-  pushDbInitPromise = env.DB.batch([
+  await env.DB.batch([
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS web_chat_messages(id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER NOT NULL,author TEXT NOT NULL,message TEXT NOT NULL,created_at TEXT NOT NULL)`),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS chat_push_devices(token TEXT PRIMARY KEY, account_id INTEGER NOT NULL, session_id TEXT NOT NULL, platform TEXT NOT NULL, updated_at INTEGER NOT NULL)`),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS chat_push_outbox(message_id INTEGER NOT NULL,token TEXT NOT NULL,account_id INTEGER NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,next_at INTEGER NOT NULL,created_at INTEGER NOT NULL,PRIMARY KEY(message_id,token))`)
-  ]).catch((error) => { pushDbInitPromise = null; throw error; });
-  return pushDbInitPromise;
+  ]);
 }
 function pushCredentials(env) {
   if (!env.FCM_SERVICE_ACCOUNT_JSON) return null;
@@ -26334,10 +26293,12 @@ async function chatWatchPulse(){
    }
  }catch(_){}
 }
-function startChatWatch(){if(state.chatWatch)clearInterval(state.chatWatch);chatWatchPulse();state.chatWatch=setInterval(chatWatchPulse,10000)}
+function startChatWatch(){if(state.chatWatch)clearInterval(state.chatWatch);chatWatchPulse();state.chatWatch=setInterval(chatWatchPulse,5000)}
 function localToday(){var parts=new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Chisinau',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());var p={};parts.forEach(function(x){p[x.type]=x.value});return p.year+'-'+p.month+'-'+p.day}
-function dateControls(id){return '<div class="date-controls"><button class="btn ghost icon-btn" id="prevDate" aria-label="Предыдущий день">'+icon('left')+'</button><input type="date" id="'+id+'" aria-label="Дата журнала" value="'+state.date+'"><button class="btn ghost icon-btn" id="nextDate" aria-label="Следующий день">'+icon('right')+'</button><button class="btn secondary today-btn" id="todayDate">Сегодня</button></div>'}
-function bindDates(id,page){document.getElementById(id).onchange=function(){if(this.value){state.date=this.value;go(page)}};[-1,1].forEach(function(dir){document.getElementById(dir<0?'prevDate':'nextDate').onclick=function(){var dt=new Date(state.date+'T12:00:00Z');dt.setUTCDate(dt.getUTCDate()+dir);state.date=dt.toISOString().slice(0,10);go(page)}});document.getElementById('todayDate').onclick=function(){state.date=localToday();go(page)}}
+function dateControls(id){return '<div class="date-controls"><button class="btn ghost icon-btn" id="prevDate" aria-label="Предыдущий учебный день">'+icon('left')+'</button><input type="date" id="'+id+'" aria-label="Дата журнала" value="'+state.date+'"><button class="btn ghost icon-btn" id="nextDate" aria-label="Следующий учебный день">'+icon('right')+'</button><button class="btn secondary today-btn" id="todayDate">Сегодня</button></div>'}
+function webIsWeekend(date){var d=new Date(date+'T12:00:00Z').getUTCDay();return d===0||d===6}
+function webWorkday(date,dir){var dt=new Date(date+'T12:00:00Z');while(dt.getUTCDay()===0||dt.getUTCDay()===6)dt.setUTCDate(dt.getUTCDate()+(dir<0?-1:1));return dt.toISOString().slice(0,10)}
+function bindDates(id,page){var input=document.getElementById(id);input.onchange=function(){if(!this.value)return;if(webIsWeekend(this.value)){toast('Суббота и воскресенье недоступны');this.value=state.date;return}state.date=this.value;go(page)};[-1,1].forEach(function(dir){document.getElementById(dir<0?'prevDate':'nextDate').onclick=function(){var dt=new Date(state.date+'T12:00:00Z');do{dt.setUTCDate(dt.getUTCDate()+dir)}while(dt.getUTCDay()===0||dt.getUTCDay()===6);state.date=dt.toISOString().slice(0,10);go(page)}});document.getElementById('todayDate').onclick=function(){state.date=webWorkday(localToday(),-1);go(page)}}
 function attendanceTools(){return '<div class="attendance-tools"><div class="attendance-search">'+icon('search')+'<input id="rosterSearch" type="search" placeholder="Найти ученика" aria-label="Найти ученика" value="'+esc(state.rosterQuery||'')+'"></div><div class="filter-tabs" aria-label="Фильтр отметок">'+[['all','Все'],['none','Без отметки'],['exceptions','Исключения']].map(function(x){return '<button data-filter="'+x[0]+'" class="'+((state.rosterFilter||'all')===x[0]?'on':'')+'" aria-pressed="'+((state.rosterFilter||'all')===x[0])+'">'+x[1]+'</button>'}).join('')+'</div></div>'}
 function drawRoster(map,kind,lesson){
  var query=(state.rosterQuery||'').toLocaleLowerCase('ru'),filter=state.rosterFilter||'all';
@@ -26721,10 +26682,12 @@ pages.pairs=async function(c){
  c.innerHTML='<div class="page-heading"><div><h2>Отметки по парам</h2><p>Выберите занятие и отметьте посещаемость</p></div></div><div class="section-head">'+dateControls('pairDate')+'</div>';
  bindDates('pairDate','pairs');
  if(!lessons){c.innerHTML+='<div class="card empty-state">'+icon('calendar')+'<b>В этот день пар нет</b><p>Выберите другую дату.</p></div>';return}
- c.innerHTML+='<div class="card pair-card"><div class="pair-switcher">'+Array.from({length:lessons},function(_,i){var n=i+1;return '<button class="btn secondary" data-pair-pick="'+n+'">'+n+' пара</button>'}).join('')+'</div><div class="pair-context" id="pairContext"></div></div><div class="card attendance-card">'+attendanceTools()+'<div class="roster-header"><span>Ученик</span><span>Статус на паре</span></div><div id="rosterRows"></div><div class="attendance-meta" id="rosterMeta" aria-live="polite"></div></div>';
+ c.innerHTML+='<div class="card pair-card"><div class="section-head"><div><b>Пары на '+fmtDate(state.date)+'</b><div class="small muted">По умолчанию 4 · можно изменить на этот день</div></div>'+(can('edit_attendance')?'<div style="display:flex;gap:8px"><button class="btn secondary" id="pairMinus" aria-label="Убрать пару">− пара</button><button class="btn secondary" id="pairPlus" aria-label="Добавить пару">+ пара</button></div>':'')+'</div><div class="pair-switcher">'+Array.from({length:lessons},function(_,i){var n=i+1;return '<button class="btn secondary" data-pair-pick="'+n+'">'+n+' пара</button>'}).join('')+'</div><div class="pair-context" id="pairContext"></div></div><div class="card attendance-card">'+attendanceTools()+'<div class="roster-header"><span>Ученик</span><span>Статус на паре</span></div><div id="rosterRows"></div><div class="attendance-meta" id="rosterMeta" aria-live="polite"></div></div>';
  bindDates('pairDate','pairs');
  function draw(){if(!c.isConnected)return;var n=state.pairLesson;document.querySelectorAll('[data-pair-pick]').forEach(function(b){var active=Number(b.dataset.pairPick)===n;b.setAttribute('aria-pressed',String(active));b.classList.toggle('secondary',!active)});document.getElementById('pairContext').innerHTML=icon('pairs')+n+' пара · '+state.students.length+' учеников';drawRoster(d.statuses[String(n)]||{},'pair',n)}
  draw();bindRoster(draw);document.querySelectorAll('[data-pair-pick]').forEach(function(b){b.onclick=function(){state.pairLesson=Number(b.dataset.pairPick);draw()}});
+ async function changePairCount(delta){var next=Math.max(1,Math.min(8,lessons+delta));if(next===lessons){toast(delta<0?'Должна остаться хотя бы 1 пара':'Максимум 8 пар');return}try{await api('/api/pairs/count',{method:'POST',body:JSON.stringify({date:state.date,lessons:next})});state.pairLesson=Math.min(state.pairLesson,next);go('pairs')}catch(e){toast(e.message)}}
+ var minus=document.getElementById('pairMinus'),plus=document.getElementById('pairPlus');if(minus)minus.onclick=function(){changePairCount(-1)};if(plus)plus.onclick=function(){changePairCount(1)};
  state.onStatusSaved=function(id,st,lesson){(d.statuses[String(lesson)]||(d.statuses[String(lesson)]={}))[String(id)]=st;draw()};
 };
 
@@ -26744,7 +26707,7 @@ async function performSave(button,action,success){var text=button.innerHTML;butt
 pages.calendar=async function(c){
  var d=await api('/api/calendar?month='+state.month),map=d.days||{},first=new Date(state.month+'-01T12:00:00'),offset=(first.getDay()+6)%7,last=new Date(first.getFullYear(),first.getMonth()+1,0).getDate(),cells='';
  for(var i=0;i<offset;i++)cells+='<div aria-hidden="true"></div>';
- for(var day=1;day<=last;day++){var date=state.month+'-'+String(day).padStart(2,'0'),q=map[date]||{},total=Number(q.absent||0)+Number(q.sick||0)+Number(q.application||0)+Number(q.partial||0);cells+='<button class="calendar-date '+(date===localToday()?'is-today':'')+'" data-journal-date="'+date+'" aria-label="'+fmtDate(date)+'. '+total+' исключений. Открыть журнал"><span>'+day+'</span><div class="calendar-marks">'+[['absent','Пропуски'],['sick','Болезни'],['application','Заявления'],['partial','Частично']].filter(function(k){return Number(q[k[0]])>0}).map(function(k){return '<small class="calendar-count '+k[0]+'" title="'+k[1]+'"><i></i>'+q[k[0]]+'</small>'}).join('')+'</div></button>'}
+ for(var day=1;day<=last;day++){var date=state.month+'-'+String(day).padStart(2,'0'),q=map[date]||{},total=Number(q.absent||0)+Number(q.sick||0)+Number(q.application||0)+Number(q.partial||0);var wd=new Date(date+'T12:00:00Z').getUTCDay(),off=wd===0||wd===6;cells+='<button '+(off?'disabled ':'')+'class="calendar-date '+(date===localToday()?'is-today ':'')+(off?'is-weekend':'')+'" '+(off?'':'data-journal-date="'+date+'"')+' aria-label="'+fmtDate(date)+(off?'. Выходной':'. '+total+' исключений. Открыть журнал')+'"><span>'+day+'</span><div class="calendar-marks">'+(off?'':[['absent','Пропуски'],['sick','Болезни'],['application','Заявления'],['partial','Частично']].filter(function(k){return Number(q[k[0]])>0}).map(function(k){return '<small class="calendar-count '+k[0]+'" title="'+k[1]+'"><i></i>'+q[k[0]]+'</small>'}).join(''))+'</div></button>'}
  c.innerHTML=pageHeading('Календарь','Выберите день, чтобы перейти к отметкам',monthControl('calMonth'))+'<div class="card calendar-card"><div class="calendar-weekdays">'+['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(function(x){return '<span>'+x+'</span>'}).join('')+'</div><div class="calendar month-calendar">'+cells+'</div><div class="calendar-legend">'+[['absent','Отсутствуют'],['sick','Болеют'],['application','Заявления'],['partial','Частично']].map(function(x){return '<span class="calendar-count '+x[0]+'"><i></i>'+x[1]+'</span>'}).join('')+'</div></div>';
  bindMonth('calMonth','calendar');c.querySelectorAll('[data-journal-date]').forEach(function(b){b.onclick=function(){state.date=b.dataset.journalDate;go('journal')}});
 };
@@ -26828,7 +26791,7 @@ pages.chat=async function(c){
  notify.onclick=function(){if(journalPush.enabled)disableChatPush();else enableChatPush(true)};
  function cleanup(){if(disposed)return;disposed=true;if(journalPush.onChange===notifState)journalPush.onChange=null;clearInterval(timer);sizeObserver.disconnect();window.removeEventListener('resize',fitChat);if(window.visualViewport)window.visualViewport.removeEventListener('resize',fitChat);obs.disconnect();if(!document.querySelector('#content .chat-shell')){document.body.classList.remove('chat-open','chat-typing');document.body.style.removeProperty('--chat-viewport');document.body.style.removeProperty('--chat-nav-height')}}
  var obs=new MutationObserver(function(){if(!c.isConnected)cleanup()});obs.observe(document.body,{childList:true,subtree:true});
- await load();if(active())timer=setInterval(load,5000);else cleanup();
+ await load();if(active())timer=setInterval(load,3000);else cleanup();
 };
 pages.online=async function(c){
  var loading=false;
@@ -26865,21 +26828,10 @@ c.innerHTML='<div class="page-heading"><div><h2>Пользователи</h2><p>
 '<div class="list">'+d.accounts.map(function(u){
  return '<div class="list-item"><div style="flex:1"><b>'+esc(u.display_name||u.login||u.telegram_user_id||'Аккаунт')+'</b>'+
  '<div class="small muted">'+esc(u.login||'без логина')+' · '+esc(({owner:'Владелец',teacher:'Преподаватель',viewer:'Просмотр'})[u.role]||u.role)+' · '+(Number(u.enabled)?'активен':'отключён')+
- (u.telegram_user_id?' · TG '+esc(u.telegram_user_id):'')+((u.telegram_links||[]).length?' · +'+(u.telegram_links||[]).length+' TG':'')+'</div></div>'+
- (u.role!=='owner'?'<div class="actions"><button class="btn secondary" data-edit="'+u.id+'">✏️ Изменить</button><button class="btn secondary" data-toggle="'+u.id+'" data-enabled="'+Number(u.enabled)+'">'+(Number(u.enabled)?'Отключить':'Включить')+'</button></div>':'<div class="actions"><button class="btn secondary" data-owner-tg="'+u.id+'">📱 Telegram</button><span class="pill">Владелец</span></div>')+
+ (u.telegram_user_id?' · TG '+esc(u.telegram_user_id):'')+'</div></div>'+
+ (u.role!=='owner'?'<div class="actions"><button class="btn secondary" data-edit="'+u.id+'">✏️ Изменить</button><button class="btn secondary" data-toggle="'+u.id+'" data-enabled="'+Number(u.enabled)+'">'+(Number(u.enabled)?'Отключить':'Включить')+'</button></div>':'<span class="pill">Владелец</span>')+
  '</div>';
 }).join('')+'</div>';
-
-document.querySelectorAll('[data-owner-tg]').forEach(function(b){
- b.onclick=function(){
-   var id=Number(b.dataset.ownerTg),u=(d.accounts||[]).find(function(x){return Number(x.id)===id});if(!u)return;
-   function linksHtml(){var links=u.telegram_links||[];return links.length?links.map(function(x){return '<div class="list-item"><div style="flex:1"><b>'+esc(x.label||'Дополнительный Telegram')+'</b><div class="small muted">TG '+esc(x.telegram_user_id)+'</div></div><button class="btn secondary" data-unlink-tg="'+esc(x.telegram_user_id)+'">Удалить</button></div>'}).join(''):'<div class="small muted">Дополнительных Telegram пока нет.</div>'}
-   modal('<h3>📱 Telegram владельца</h3><p class="modal-sub">Основной: TG '+esc(u.telegram_user_id||'не указан')+'. Дополнительные аккаунты входят с теми же правами владельца.</p><div id="ownerTgLinks" class="list">'+linksHtml()+'</div><div class="field" style="margin-top:16px"><label>Telegram ID второго аккаунта</label><input id="ownerTgId" inputmode="numeric" placeholder="Например: 123456789"><div class="small muted">На втором аккаунте отправь боту /myid — он покажет ID.</div></div><div class="field"><label>Название — необязательно</label><input id="ownerTgLabel" placeholder="Например: Второй аккаунт"></div><div id="ownerTgError" class="small" style="color:#ffbe55;margin-top:8px"></div><button class="btn" id="ownerTgAdd" style="width:100%;margin-top:12px">+ Привязать Telegram</button>');
-   function bindRemove(){document.querySelectorAll('[data-unlink-tg]').forEach(function(x){x.onclick=async function(){if(!confirm('Отвязать этот Telegram от владельца?'))return;try{await api('/api/admin/owner-telegram/delete',{method:'POST',body:JSON.stringify({telegram_user_id:x.dataset.unlinkTg})});toast('Telegram отвязан');closeModal();go('users')}catch(e){toast(e.message)}}})}
-   bindRemove();
-   document.getElementById('ownerTgAdd').onclick=async function(){var tg=document.getElementById('ownerTgId').value.trim(),label=document.getElementById('ownerTgLabel').value.trim(),err=document.getElementById('ownerTgError');err.textContent='';if(!/^\\d{5,20}$/.test(tg)){err.textContent='⚠️ Telegram ID — только цифры';return}this.disabled=true;try{await api('/api/admin/owner-telegram/add',{method:'POST',body:JSON.stringify({telegram_user_id:tg,label:label})});toast('Telegram привязан к владельцу');closeModal();go('users')}catch(e){err.textContent='⚠️ '+e.message;this.disabled=false}};
- };
-});
 
 document.getElementById('newAccount').onclick=function(){
  modal('<h3>Создать пользователя</h3>'+
@@ -26986,6 +26938,7 @@ pages.audit=async function(c){
     attendance_set:['👥','Изменена посещаемость','Посещаемость'],
     attendance_all_present:['✅','Все отмечены присутствующими','Посещаемость'],
     pair_attendance_set:['📚','Изменена отметка на паре','Пары'],
+    pair_count_set:['➕','Изменено число пар','Пары'],
     student_add:['➕','Добавлен студент','Студенты'],
     student_update:['✏️','Изменены данные студента','Студенты'],
     student_delete:['🗑️','Удалён студент','Студенты'],
@@ -27114,7 +27067,7 @@ document.getElementById('passPane').onsubmit=async function(e){e.preventDefault(
 async function searchJournal(q){try{var d=await api('/api/search?q='+encodeURIComponent(q));modal('<h3>Результаты поиска</h3><p class="modal-sub">'+esc(q)+'</p><div class="list">'+((d.results||[]).map(function(x){return '<div class="list-item"><div><b>'+esc(x.title)+'</b><div class="muted small">'+esc(x.subtitle||'')+'</div></div></div>'}).join('')||'<div class="empty-state">Ничего не найдено</div>')+'</div>')}catch(e){toast(e.message)}}
 document.getElementById('globalSearch').onkeydown=function(e){if(e.key==='Enter'&&this.value.trim())searchJournal(this.value.trim())};
 document.getElementById('openSearch').onclick=function(){modal('<h3>Поиск по журналу</h3><form id="mobileSearchForm"><div class="field"><label for="mobileSearchInput">Имя или событие</label><input type="search" id="mobileSearchInput" placeholder="Что найти?" required></div><button class="btn" type="submit">Найти</button></form>');document.getElementById('mobileSearchForm').onsubmit=function(e){e.preventDefault();var q=document.getElementById('mobileSearchInput').value.trim();if(q)searchJournal(q)}};
-state.date=localToday();state.month=state.date.slice(0,7);
+state.date=webWorkday(localToday(),-1);state.month=state.date.slice(0,7);
 var presenceBusy=false,presenceRequest=null;
 async function presencePulse(){
  if(document.hidden||!state.me||presenceBusy)return;
@@ -27122,7 +27075,7 @@ async function presencePulse(){
  try{await api('/api/me',{cache:'no-store',signal:presenceRequest.signal})}catch(e){}finally{clearTimeout(timeout);presenceBusy=false;presenceRequest=null}
  if(!document.hidden&&state.me&&state.page==='online'&&state.refreshPresence)await state.refreshPresence();
 }
-setInterval(presencePulse,60000);
+setInterval(presencePulse,30000);
 document.addEventListener('visibilitychange',function(){if(document.hidden){if(presenceRequest)presenceRequest.abort()}else presencePulse()});
 
 async function boot(){
@@ -27192,6 +27145,10 @@ async function initWebDb(env) {
         room TEXT,
         PRIMARY KEY(weekday, lesson_no)
     )`).run();
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS day_lesson_counts (
+        date TEXT PRIMARY KEY,
+        lessons INTEGER NOT NULL
+    )`).run();
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS student_notes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         student_id INTEGER NOT NULL,
@@ -27206,7 +27163,6 @@ async function initWebDb(env) {
         created_at TEXT NOT NULL,
         read_at TEXT
     )`).run();
-  await ensureTelegramLinksTable(env);
   await ensureColumn(env, "web_accounts", "display_name", "TEXT");
   await ensureColumn(env, "web_accounts", "password_salt", "TEXT");
   await ensureColumn(env, "web_accounts", "permissions_json", "TEXT");
@@ -27404,8 +27360,6 @@ async function telegramWebAppUser(initData, env) {
 __name(telegramWebAppUser, "telegramWebAppUser");
 async function ensureTelegramAccount(env, tg) {
   const uid = String(tg.id);
-  const linked = await linkedWebAccountByTelegram(env, uid).catch(() => null);
-  if (linked) return linked;
   const allowed = await isAdmin(env, uid);
   if (!allowed) return null;
   let a = await env.DB.prepare(`SELECT * FROM web_accounts WHERE telegram_user_id=?`).bind(uid).first();
@@ -27708,6 +27662,8 @@ async function smartMonthData(env, month) {
         SELECT date,student_id,lesson_no,status FROM lesson_attendance
         WHERE substr(date,1,7)=?
     `).bind(month).all()).results || [];
+  const lessonCountRows = (await env.DB.prepare(`SELECT date,lessons FROM day_lesson_counts WHERE substr(date,1,7)=?`).bind(month).all()).results || [];
+  const lessonCountMap = new Map(lessonCountRows.map((r) => [r.date, Number(r.lessons)]));
   const dates = /* @__PURE__ */ new Set([...dailyRows.map((r) => r.date), ...pairRows.map((r) => r.date)]);
   const dailyMap = new Map(dailyRows.map((r) => [`${r.date}:${r.student_id}`, r.status]));
   const pairMap = /* @__PURE__ */ new Map();
@@ -27731,7 +27687,7 @@ async function smartMonthData(env, month) {
     days: []
   }]));
   for (const date of [...dates].sort()) {
-    const lessons = lessonsCountForDate(date);
+    const lessons = normalizedLessonCount(date, lessonCountMap.get(date));
     for (const st of students) {
       const sid = Number(st.id);
       const key = `${date}:${sid}`;
@@ -27770,8 +27726,9 @@ async function dashboardApi(env) {
     pairMap.get(sid).push(r);
   }
   const summaries = [];
+  const todayLessons = await lessonsCountForDate(env, date);
   for (const st of students) {
-    const summary = smartDayStatus(dailyMap.get(Number(st.id)) || "none", pairMap.get(Number(st.id)) || [], lessonsCountForDate(date));
+    const summary = smartDayStatus(dailyMap.get(Number(st.id)) || "none", pairMap.get(Number(st.id)) || [], todayLessons);
     summaries.push({ id: st.id, name: st.name, ...summary });
   }
   const today = summaries.filter((x) => !["present", "none"].includes(x.kind)).map((x) => ({
@@ -27872,11 +27829,13 @@ async function handleWebApi(request, env, url, ctx) {
         if (!pairMap.has(r.date)) pairMap.set(r.date, []);
         pairMap.get(r.date).push(r);
       }
+      const lessonCountRows = (await env.DB.prepare(`SELECT date,lessons FROM day_lesson_counts`).all()).results || [];
+      const lessonCountMap = new Map(lessonCountRows.map((r) => [r.date, Number(r.lessons)]));
       const events = [];
       let absent = 0, sick2 = 0, application2 = 0, presentDays = 0, countedDays = 0, partial = 0;
       for (const date of dates) {
         const pairs = pairMap.get(date) || [];
-        const summary = smartDayStatus(dailyMap.get(date) || "none", pairs, lessonsCountForDate(date));
+        const summary = smartDayStatus(dailyMap.get(date) || "none", pairs, normalizedLessonCount(date, lessonCountMap.get(date)));
         if (summary.kind === "none") continue;
         countedDays++;
         if (summary.present_any) presentDays++;
@@ -27928,7 +27887,7 @@ async function handleWebApi(request, env, url, ctx) {
       return jsonResponse({ ok: true });
     }
     if (path === "/api/pairs" && request.method === "GET") {
-      const date = qdate(url.searchParams.get("date")), lessons = lessonsCountForDate(date);
+      const date = qdate(url.searchParams.get("date")), lessons = await lessonsCountForDate(env, date);
       const rows = (await env.DB.prepare(`SELECT lesson_no,student_id,status FROM lesson_attendance WHERE date=?`).bind(date).all()).results || [];
       const statuses = {};
       for (const r of rows) {
@@ -27936,9 +27895,23 @@ async function handleWebApi(request, env, url, ctx) {
       }
       return jsonResponse({ date, lessons, statuses });
     }
+    if (path === "/api/pairs/count" && request.method === "POST") {
+      if (!canWeb(user, "edit_attendance")) return jsonResponse({ error: "Нет права" }, 403);
+      const date = qdate(body.date), day = dateWeekday(date);
+      if (day === 0 || day === 6) return jsonResponse({ error: "Суббота и воскресенье не являются учебными днями" }, 400);
+      const lessons = Math.max(1, Math.min(8, Number(body.lessons) || 4));
+      await env.DB.prepare(`INSERT INTO day_lesson_counts(date,lessons) VALUES(?,?)
+        ON CONFLICT(date) DO UPDATE SET lessons=excluded.lessons`).bind(date, lessons).run();
+      await env.DB.prepare(`DELETE FROM lesson_attendance WHERE date=? AND lesson_no>?`).bind(date, lessons).run();
+      await webAudit(env, user, "pair_count_set", `${date}: ${lessons}`);
+      return jsonResponse({ ok: true, date, lessons });
+    }
     if (path === "/api/pairs" && request.method === "POST") {
       if (!canWeb(user, "edit_attendance")) return jsonResponse({ error: "\u041D\u0435\u0442 \u043F\u0440\u0430\u0432\u0430" }, 403);
       const date = qdate(body.date), lesson = Number(body.lesson_no), sid = Number(body.student_id), st = String(body.status || "none");
+      const lessonLimit = await lessonsCountForDate(env, date);
+      if (lessonLimit <= 0) return jsonResponse({ error: "На выходных пары не отмечаются" }, 400);
+      if (lesson < 1 || lesson > lessonLimit) return jsonResponse({ error: "Такой пары нет в выбранный день" }, 400);
       if (st === "none") await env.DB.prepare(`DELETE FROM lesson_attendance WHERE date=? AND lesson_no=? AND student_id=?`).bind(date, lesson, sid).run();
       else await env.DB.prepare(`INSERT INTO lesson_attendance(date,lesson_no,student_id,status) VALUES(?,?,?,?) ON CONFLICT(date,lesson_no,student_id) DO UPDATE SET status=excluded.status`).bind(date, lesson, sid, st).run();
       await webAudit(env, user, "pair_attendance_set", `${date} pair=${lesson} student=${sid} status=${st}`);
@@ -27972,12 +27945,14 @@ async function handleWebApi(request, env, url, ctx) {
     }
     if (path === "/api/duty" && request.method === "GET") {
       const date = qdate(url.searchParams.get("date"));
+      if ([0,6].includes(dateWeekday(date))) return jsonResponse({ date, students: [], workday: false });
       const students = (await env.DB.prepare(`SELECT s.id,s.name FROM duty d JOIN students s ON s.id=d.student_id WHERE d.date=? ORDER BY s.name`).bind(date).all()).results || [];
-      return jsonResponse({ date, students });
+      return jsonResponse({ date, students, workday: true });
     }
     if (path === "/api/duty" && request.method === "POST") {
       if (!canWeb(user, "edit_duty")) return jsonResponse({ error: "\u041D\u0435\u0442 \u043F\u0440\u0430\u0432\u0430" }, 403);
       const date = qdate(body.date), ids = Array.isArray(body.student_ids) ? body.student_ids.map(Number) : [];
+      if ([0,6].includes(dateWeekday(date))) return jsonResponse({ error: "На субботу и воскресенье дежурные не назначаются" }, 400);
       await env.DB.prepare(`DELETE FROM duty WHERE date=?`).bind(date).run();
       for (const id of ids) await env.DB.prepare(`INSERT OR IGNORE INTO duty(date,student_id) VALUES(?,?)`).bind(date, id).run();
       await webAudit(env, user, "duty_set", `${date}: ${ids.join(",")}`);
@@ -27994,6 +27969,14 @@ async function handleWebApi(request, env, url, ctx) {
       await env.DB.prepare(`INSERT INTO schedule_lessons(weekday,lesson_no,subject,time,teacher,room) VALUES(?,?,?,?,?,?)
                 ON CONFLICT(weekday,lesson_no) DO UPDATE SET subject=excluded.subject,time=excluded.time,teacher=excluded.teacher,room=excluded.room`).bind(Number(body.weekday), Number(body.lesson_no), String(body.subject || ""), String(body.time || ""), String(body.teacher || ""), String(body.room || "")).run();
       await webAudit(env, user, "schedule_set", `day=${body.weekday} lesson=${body.lesson_no}`);
+      return jsonResponse({ ok: true });
+    }
+    if (path === "/api/schedule/delete" && request.method === "POST") {
+      if (!canWeb(user, "edit_schedule")) return jsonResponse({ error: "Нет права" }, 403);
+      const weekday = Number(body.weekday), lesson = Number(body.lesson_no);
+      if (weekday < 1 || weekday > 5 || lesson < 1 || lesson > 8) return jsonResponse({ error: "Неверный день или номер пары" }, 400);
+      await env.DB.prepare(`DELETE FROM schedule_lessons WHERE weekday=? AND lesson_no=?`).bind(weekday, lesson).run();
+      await webAudit(env, user, "schedule_set", `delete day=${weekday} lesson=${lesson}`);
       return jsonResponse({ ok: true });
     }
     if (path === "/api/class-hour" && request.method === "GET") {
@@ -28462,7 +28445,13 @@ async function handleWebApi(request, env, url, ctx) {
     }
 
     if (path === "/api/chat" && request.method === "GET") {
-      await ensureChatDb(env);
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS web_chat_messages(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id INTEGER NOT NULL,
+        author TEXT NOT NULL,
+        message TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )`).run();
       const after=Math.max(0,Number(url.searchParams.get("after")||0)||0);
       const rows=(await env.DB.prepare(`SELECT id,account_id,author,message,created_at FROM web_chat_messages
         WHERE id>? ORDER BY id DESC LIMIT 120`).bind(after).all()).results||[];
@@ -28471,7 +28460,13 @@ async function handleWebApi(request, env, url, ctx) {
         time_text:new Date(r.created_at).toLocaleString("ru-RU",{timeZone:"Europe/Chisinau",day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}))});
     }
     if (path === "/api/chat" && request.method === "POST") {
-      await ensureChatDb(env);
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS web_chat_messages(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        account_id INTEGER NOT NULL,
+        author TEXT NOT NULL,
+        message TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      )`).run();
       const message=String(body.message||"").trim().slice(0,1500);
       if(!message)return jsonResponse({error:"Пустое сообщение"},400);
       const author=String(user.display_name||user.login||"Пользователь").slice(0,100),now=new Date().toISOString();
@@ -28498,35 +28493,7 @@ async function handleWebApi(request, env, url, ctx) {
     }
     if (path === "/api/admin/accounts" && request.method === "GET") {
       if (user.role !== "owner") return jsonResponse({ error: "\u0422\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u0430\u0434\u0435\u043B\u0435\u0446" }, 403);
-      await ensureTelegramLinksTable(env);
-      const accounts = (await env.DB.prepare(`SELECT id,telegram_user_id,login,role,enabled,display_name,last_login,permissions_json FROM web_accounts ORDER BY id`).all()).results || [];
-      const links = (await env.DB.prepare(`SELECT telegram_user_id,account_id,label,created_at FROM web_account_telegram_links ORDER BY created_at`).all()).results || [];
-      for (const a of accounts) a.telegram_links = links.filter(l => Number(l.account_id) === Number(a.id));
-      return jsonResponse({ accounts });
-    }
-    if (path === "/api/admin/owner-telegram/add" && request.method === "POST") {
-      if (user.role !== "owner") return jsonResponse({ error: "\u0422\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u0430\u0434\u0435\u043B\u0435\u0446" }, 403);
-      await ensureTelegramLinksTable(env);
-      const tg = String(body.telegram_user_id || "").trim();
-      const label = String(body.label || "\u0412\u0442\u043E\u0440\u043E\u0439 Telegram").trim().slice(0, 60);
-      if (!/^\d{5,20}$/.test(tg)) return jsonResponse({ error: "Telegram ID должен состоять только из цифр" }, 400);
-      if (tg === String(user.telegram_user_id || "")) return jsonResponse({ error: "Это уже основной Telegram владельца" }, 409);
-      const direct = await env.DB.prepare(`SELECT id,role FROM web_accounts WHERE telegram_user_id=?`).bind(tg).first();
-      if (direct) return jsonResponse({ error: direct.id === user.id ? "Этот Telegram уже привязан" : "Этот Telegram ID уже принадлежит другому пользователю" }, 409);
-      const existing = await env.DB.prepare(`SELECT account_id FROM web_account_telegram_links WHERE telegram_user_id=?`).bind(tg).first();
-      if (existing) return jsonResponse({ error: Number(existing.account_id) === Number(user.id) ? "Этот Telegram уже привязан" : "Этот Telegram ID уже привязан к другому аккаунту" }, 409);
-      await env.DB.prepare(`INSERT INTO web_account_telegram_links(telegram_user_id,account_id,label,created_at) VALUES(?,?,?,?)`)
-        .bind(tg, user.id, label || "Второй Telegram", new Date().toISOString()).run();
-      await webAudit(env, user, "owner_telegram_add", tg);
-      return jsonResponse({ ok: true });
-    }
-    if (path === "/api/admin/owner-telegram/delete" && request.method === "POST") {
-      if (user.role !== "owner") return jsonResponse({ error: "\u0422\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u0430\u0434\u0435\u043B\u0435\u0446" }, 403);
-      await ensureTelegramLinksTable(env);
-      const tg = String(body.telegram_user_id || "").trim();
-      await env.DB.prepare(`DELETE FROM web_account_telegram_links WHERE telegram_user_id=? AND account_id=?`).bind(tg, user.id).run();
-      await webAudit(env, user, "owner_telegram_delete", tg);
-      return jsonResponse({ ok: true });
+      return jsonResponse({ accounts: (await env.DB.prepare(`SELECT id,telegram_user_id,login,role,enabled,display_name,last_login,permissions_json FROM web_accounts ORDER BY id`).all()).results || [] });
     }
     if (path === "/api/admin/accounts" && request.method === "POST") {
       if (user.role !== "owner") return jsonResponse({ error: "\u0422\u043E\u043B\u044C\u043A\u043E \u0432\u043B\u0430\u0434\u0435\u043B\u0435\u0446" }, 403);
@@ -28644,7 +28611,7 @@ async function handleWebApi(request, env, url, ctx) {
     }
     if (path === "/api/backup") {
       if (!canWeb(user, "reports")) return jsonResponse({ error: "\u041D\u0435\u0442 \u043F\u0440\u0430\u0432\u0430" }, 403);
-      const tables = ["students", "attendance", "lesson_attendance", "duty", "schedule_lessons"];
+      const tables = ["students", "attendance", "lesson_attendance", "duty", "schedule_lessons", "day_lesson_counts"];
       const data = { created_at: (/* @__PURE__ */ new Date()).toISOString(), tables: {} };
       for (const t of tables) data.tables[t] = (await env.DB.prepare(`SELECT * FROM ${t}`).all()).results || [];
       return new Response(JSON.stringify(data, null, 2), { headers: { "content-type": "application/json; charset=UTF-8", "content-disposition": "attachment; filename=journal102_backup.json" } });
