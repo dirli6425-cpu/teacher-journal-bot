@@ -21199,9 +21199,19 @@ var index_default = {
     if(request.method==='GET'&&url.pathname==='/firebase-messaging-sw.js')return new Response(CHAT_PUSH_SW.replace('__PUSH_CONFIG__',JSON.stringify(PUSH_WEB_CONFIG)),{headers:{'content-type':'application/javascript; charset=utf-8','cache-control':'no-cache','service-worker-allowed':'/'}});
     if(request.method==='GET'&&url.pathname==='/push-icon.svg')return new Response('<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192"><rect width="192" height="192" rx="44" fill="#364558"/><path d="M44 42h104v80H88l-44 30z" fill="#e4e6eb"/><path d="M65 70h62M65 92h44" stroke="#364558" stroke-width="9"/></svg>',{headers:{'content-type':'image/svg+xml','cache-control':'public,max-age=86400'}});
     try {
-      await initDb(env);
-      await rememberWebOrigin(env, url.origin);
+      // IMPORTANT: do not run database migrations on every HTTP request.
+      // The old code executed dozens of CREATE/PRAGMA/UPDATE queries before
+      // even routing /api/me or /api/chat, which can exhaust Workers CPU.
+      if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/app")) {
+        // Origin persistence is not request-critical; keep it off the hot API path.
+        const remember = rememberWebOrigin(env, url.origin).catch(() => {});
+        if (ctx && ctx.waitUntil) ctx.waitUntil(remember);
+      }
       if (request.method === "GET" && url.pathname === "/setup") {
+        // Schema/bootstrap work is allowed only on the explicit setup route.
+        await initDb(env);
+        await initPushDb(env);
+        await rememberWebOrigin(env, url.origin);
         const webhookUrl = `${url.origin}/webhook`;
         const result = await telegram(env, "setWebhook", {
           url: webhookUrl,
@@ -21220,14 +21230,14 @@ ${JSON.stringify(result)}`);
         return jsonResponse({
           // Activate the new mandatory update only after a production APK, signed
           // with the existing application's key, has been uploaded to this URL.
-          // Publish code 21 only after uploading the matching APK: set ANDROID_VERSION_CODE=21 and ANDROID_VERSION_NAME=2.2.4.
-          versionCode: 21,
-          versionName: "2.2.4",
+          // Publish code 20 only after uploading the matching APK: set ANDROID_VERSION_CODE=20 and ANDROID_VERSION_NAME=2.2.3.
+          versionCode: env.ANDROID_APK_URL ? (Number(env.ANDROID_VERSION_CODE) || 16) : 20,
+          versionName: env.ANDROID_APK_URL ? String(env.ANDROID_VERSION_NAME || "2.1.3") : "2.2.3",
           required: true,
           notes: env.ANDROID_APK_URL
             ? "Доступно обновление Журнала 102."
             : "Текущая опубликованная версия Журнала 102.",
-          apkUrl: env.ANDROID_APK_URL || "https://github.com/dirli6425-cpu/teacher-journal-bot/releases/download/2.2.4/app-debug.apk"
+          apkUrl: env.ANDROID_APK_URL || "https://github.com/dirli6425-cpu/teacher-journal-bot/releases/download/2.2.3/app-debug.apk"
         });
       }
       if (request.method === "GET" && url.pathname === "/android/latest.apk") {
@@ -21294,6 +21304,14 @@ async function initDb(env) {
         date,
         student_id
       )
+    )
+  `).run();
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS practice_attendance (
+      date TEXT NOT NULL,
+      student_id INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      PRIMARY KEY(date, student_id)
     )
   `).run();
   await env.DB.prepare(`
@@ -24708,16 +24726,16 @@ initDb = /* @__PURE__ */ __name(async function(env) {
     PRIMARY KEY(date,student_id)
   )`).run();
 }, "initDb");
-function normalizedLessonCount(date, value) {
+function lessonsCountForDate(date) {
   const day = dateWeekday(date);
-  if (day === 0 || day === 6) return 0;
-  const lessons = Number(value || 4);
-  return Math.max(1, Math.min(8, Number.isFinite(lessons) ? lessons : 4));
-}
-__name(normalizedLessonCount, "normalizedLessonCount");
-async function lessonsCountForDate(env, date) {
-  const saved = await env.DB.prepare(`SELECT lessons FROM day_lesson_counts WHERE date=?`).bind(date).first();
-  return normalizedLessonCount(date, saved?.lessons);
+  const schedule = {
+    1: 3,
+    2: 4,
+    3: 4,
+    4: 3,
+    5: 4
+  };
+  return schedule[day] || 4;
 }
 __name(lessonsCountForDate, "lessonsCountForDate");
 function pairStatusEmoji(status) {
@@ -24754,7 +24772,7 @@ async function getPairStatuses(env, date) {
 __name(getPairStatuses, "getPairStatuses");
 async function showPairsDay(env, chatId, messageId, date) {
   const students = await getActiveStudents(env);
-  const lessonCount = await lessonsCountForDate(env, date);
+  const lessonCount = lessonsCountForDate(date);
   const statuses = await getPairStatuses(env, date);
   const previous = previousWorkday(date);
   const next = nextWorkday(date);
@@ -24839,7 +24857,7 @@ async function showPairStudent(env, chatId, messageId, date, studentId) {
   if (!student) {
     return;
   }
-  const lessonCount = await lessonsCountForDate(env, date);
+  const lessonCount = lessonsCountForDate(date);
   const statuses = await getPairStatuses(env, date);
   let text = `\u{1F464} <b>${escapeHtml(student.name)}</b>
 
@@ -24950,7 +24968,7 @@ async function cyclePairStatus(env, date, lesson, studentId) {
 }
 __name(cyclePairStatus, "cyclePairStatus");
 async function markStudentLeft(env, date, leaveLesson, studentId) {
-  const lessonCount = await lessonsCountForDate(env, date);
+  const lessonCount = lessonsCountForDate(date);
   for (let lesson = 1; lesson <= lessonCount; lesson++) {
     let status;
     if (lesson < leaveLesson) {
@@ -24989,7 +25007,7 @@ async function markStudentLeft(env, date, leaveLesson, studentId) {
 __name(markStudentLeft, "markStudentLeft");
 async function showPairsSummary(env, chatId, messageId, date) {
   const students = await getActiveStudents(env);
-  const lessonCount = await lessonsCountForDate(env, date);
+  const lessonCount = lessonsCountForDate(date);
   const statuses = await getPairStatuses(env, date);
   let text = `\u{1F440} <b>\u041A\u0422\u041E \u0411\u042B\u041B \u041F\u041E \u041F\u0410\u0420\u0410\u041C</b>
 
@@ -25810,18 +25828,28 @@ handleExtraCallback = /* @__PURE__ */ __name(async function(data, env, chatId, m
     userId
   );
 }, "handleExtraCallback");
-// Journal 102 — Calm design 2.2.4; Android source versionCode 21.
+// Journal 102 — Calm design 2.2.3; Android source versionCode 20.
 // Firebase credentials are read only from a Cloudflare secret, never sent to clients.
 var PUSH_PROJECT = "journal102";
 var PUSH_WEB_CONFIG = {apiKey:"AIzaSyBiJWvKNMuUIHXgS4ZHoe8TRI-3Hk14EPM",authDomain:"journal102.firebaseapp.com",projectId:"journal102",storageBucket:"journal102.firebasestorage.app",messagingSenderId:"52462064879",appId:"1:52462064879:web:db80e6a0f22f4573b7f71a"};
 var PUSH_VAPID = "BD8k3GSEdVzc8zB-d40haWnACdknQX9sHzT_NrdjZd_qZ_KrWaRWjNmFbREKNRlzRH-kLtZbmF8CSC6Uc2b0-Mw";
 var pushOAuthCache = null;
+var chatDbInitPromise = null;
+async function ensureChatDb(env) {
+  if (chatDbInitPromise) return chatDbInitPromise;
+  chatDbInitPromise = env.DB.prepare(`CREATE TABLE IF NOT EXISTS web_chat_messages(id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER NOT NULL,author TEXT NOT NULL,message TEXT NOT NULL,created_at TEXT NOT NULL)`).run()
+    .catch((error) => { chatDbInitPromise = null; throw error; });
+  return chatDbInitPromise;
+}
+var pushDbInitPromise = null;
 async function initPushDb(env) {
-  await env.DB.batch([
+  if (pushDbInitPromise) return pushDbInitPromise;
+  pushDbInitPromise = env.DB.batch([
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS web_chat_messages(id INTEGER PRIMARY KEY AUTOINCREMENT,account_id INTEGER NOT NULL,author TEXT NOT NULL,message TEXT NOT NULL,created_at TEXT NOT NULL)`),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS chat_push_devices(token TEXT PRIMARY KEY, account_id INTEGER NOT NULL, session_id TEXT NOT NULL, platform TEXT NOT NULL, updated_at INTEGER NOT NULL)`),
     env.DB.prepare(`CREATE TABLE IF NOT EXISTS chat_push_outbox(message_id INTEGER NOT NULL,token TEXT NOT NULL,account_id INTEGER NOT NULL,attempts INTEGER NOT NULL DEFAULT 0,next_at INTEGER NOT NULL,created_at INTEGER NOT NULL,PRIMARY KEY(message_id,token))`)
-  ]);
+  ]).catch((error) => { pushDbInitPromise = null; throw error; });
+  return pushDbInitPromise;
 }
 function pushCredentials(env) {
   if (!env.FCM_SERVICE_ACCOUNT_JSON) return null;
@@ -26107,7 +26135,7 @@ body.chat-open{overflow:hidden}
 (function(){
 var state={me:null,page:'dashboard',students:[],date:new Date().toISOString().slice(0,10),month:new Date().toISOString().slice(0,7),chatUnread:0,chatLastSeen:Number(localStorage.getItem('chatLastSeen')||0),chatWatch:null};
 var nav=[
- ['dashboard','🏠','Главная'],['journal','👥','Журнал'],['pairs','📚','По парам'],['students','👤','Студенты'],['lineup','📢','Линейка'],['classhour','🧑‍🏫','Классный час'],['meals','🍽️','Питание'],
+ ['dashboard','🏠','Главная'],['journal','👥','Журнал'],['practice','🛠️','Практика'],['pairs','📚','По парам'],['students','👤','Студенты'],['lineup','📢','Линейка'],['classhour','🧑‍🏫','Классный час'],['meals','🍽️','Питание'],
  ['calendar','📅','Календарь'],['health','🤒','Болезни и заявления'],['duty','🧹','Дежурство'],
  ['schedule','🗓️','Расписание'],['parents','👨‍👩‍👦','Родителям'],['analytics','📊','Аналитика'],
  ['reports','📄','Отчёты'],['chat','💬','Чат'],['online','🟢','Онлайн'],['users','👥','Пользователи'],
@@ -26215,7 +26243,7 @@ function initials(name){return String(name||'').trim().split(/\\s+/).slice(0,2).
 function can(perm){if(!state.me)return false;if(state.me.role==='owner')return true;var p=state.me.permissions||[];if(p.includes(perm))return true;if(state.me.role==='viewer')return perm==='view_journal';return state.me.role==='teacher'&&['view_journal','edit_attendance','edit_students','edit_duty','edit_schedule','reports'].includes(perm)}
 function canPage(page){if(['users','audit','settings','online'].includes(page))return state.me&&state.me.role==='owner';if(page==='reports')return can('reports');return can('view_journal')}
 function renderNav(){
- var groups=[['Основное',['dashboard','journal','pairs','students']],['Учебный процесс',['lineup','classhour','meals','calendar','health','duty','schedule']],['Обзоры',['parents','analytics','reports']],['Общение',['chat']],['Управление',['online','users','audit','settings']]];
+ var groups=[['Основное',['dashboard','journal','practice','pairs','students']],['Учебный процесс',['lineup','classhour','meals','calendar','health','duty','schedule']],['Обзоры',['parents','analytics','reports']],['Общение',['chat']],['Управление',['online','users','audit','settings']]];
  document.getElementById('sideNav').innerHTML=groups.map(function(g){var items=nav.filter(function(n){return g[1].includes(n[0])&&canPage(n[0])});if(!items.length)return '';return '<div class="nav-label">'+g[0]+'</div>'+items.map(function(n){return '<button class="navbtn '+(state.page===n[0]?'on':'')+'" data-p="'+n[0]+'" '+(state.page===n[0]?'aria-current="page"':'')+'>'+icon(n[0])+'<span>'+n[2]+'</span></button>'}).join('')}).join('');
  var labels={dashboard:'Главная',journal:'Журнал',pairs:'Пары',chat:'Чат'};
  var mobile=nav.filter(function(n){return labels[n[0]]&&canPage(n[0])}).map(function(n){return '<button data-p="'+n[0]+'" class="'+(state.page===n[0]?'on':'')+'" '+(state.page===n[0]?'aria-current="page"':'')+'>'+icon(n[0])+'<span>'+labels[n[0]]+'</span></button>'}).join('');
@@ -26265,7 +26293,7 @@ function openStatus(kind,id,date,lesson){
  modal('<h3>'+esc(studentName(id))+'</h3><p class="modal-sub">'+fmtDate(date)+(lesson?' · '+lesson+' пара':' · Отметка за день')+'</p><div class="status-grid">'+buttons+'</div><div class="modal-error" id="statusError" role="alert"></div>');
  document.querySelectorAll('#modalRoot [data-st]').forEach(function(b){b.onclick=async function(){
   var chosen=b.dataset.st,all=document.querySelectorAll('#modalRoot [data-st]');all.forEach(function(x){x.disabled=true});
-  try{await api(kind==='pair'?'/api/pairs':'/api/attendance',{method:'POST',body:JSON.stringify({student_id:Number(id),date:date,lesson_no:lesson?Number(lesson):undefined,status:chosen})});closeModal();
+  try{await api(kind==='pair'?'/api/pairs':kind==='practice'?'/api/practice-attendance':'/api/attendance',{method:'POST',body:JSON.stringify({student_id:Number(id),date:date,lesson_no:lesson?Number(lesson):undefined,status:chosen})});closeModal();
    if(state.onStatusSaved)state.onStatusSaved(id,chosen,lesson);else document.querySelectorAll('.statusbtn[data-id="'+id+'"]').forEach(function(x){x.dataset.status=chosen;x.innerHTML=icon(statusIcons[chosen])+'<span>'+statusLabels[chosen]+'</span>';x.setAttribute('aria-label',studentName(id)+': '+statusLabels[chosen])});toast('Отметка сохранена')
   }catch(e){var er=document.getElementById('statusError');if(er)er.textContent=e.message;all.forEach(function(x){x.disabled=false});b.focus()}
  }})
@@ -26293,12 +26321,10 @@ async function chatWatchPulse(){
    }
  }catch(_){}
 }
-function startChatWatch(){if(state.chatWatch)clearInterval(state.chatWatch);chatWatchPulse();state.chatWatch=setInterval(chatWatchPulse,5000)}
+function startChatWatch(){if(state.chatWatch)clearInterval(state.chatWatch);chatWatchPulse();state.chatWatch=setInterval(chatWatchPulse,10000)}
 function localToday(){var parts=new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Chisinau',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());var p={};parts.forEach(function(x){p[x.type]=x.value});return p.year+'-'+p.month+'-'+p.day}
-function dateControls(id){return '<div class="date-controls"><button class="btn ghost icon-btn" id="prevDate" aria-label="Предыдущий учебный день">'+icon('left')+'</button><input type="date" id="'+id+'" aria-label="Дата журнала" value="'+state.date+'"><button class="btn ghost icon-btn" id="nextDate" aria-label="Следующий учебный день">'+icon('right')+'</button><button class="btn secondary today-btn" id="todayDate">Сегодня</button></div>'}
-function webIsWeekend(date){var d=new Date(date+'T12:00:00Z').getUTCDay();return d===0||d===6}
-function webWorkday(date,dir){var dt=new Date(date+'T12:00:00Z');while(dt.getUTCDay()===0||dt.getUTCDay()===6)dt.setUTCDate(dt.getUTCDate()+(dir<0?-1:1));return dt.toISOString().slice(0,10)}
-function bindDates(id,page){var input=document.getElementById(id);input.onchange=function(){if(!this.value)return;if(webIsWeekend(this.value)){toast('Суббота и воскресенье недоступны');this.value=state.date;return}state.date=this.value;go(page)};[-1,1].forEach(function(dir){document.getElementById(dir<0?'prevDate':'nextDate').onclick=function(){var dt=new Date(state.date+'T12:00:00Z');do{dt.setUTCDate(dt.getUTCDate()+dir)}while(dt.getUTCDay()===0||dt.getUTCDay()===6);state.date=dt.toISOString().slice(0,10);go(page)}});document.getElementById('todayDate').onclick=function(){state.date=webWorkday(localToday(),-1);go(page)}}
+function dateControls(id){return '<div class="date-controls"><button class="btn ghost icon-btn" id="prevDate" aria-label="Предыдущий день">'+icon('left')+'</button><input type="date" id="'+id+'" aria-label="Дата журнала" value="'+state.date+'"><button class="btn ghost icon-btn" id="nextDate" aria-label="Следующий день">'+icon('right')+'</button><button class="btn secondary today-btn" id="todayDate">Сегодня</button></div>'}
+function bindDates(id,page){document.getElementById(id).onchange=function(){if(this.value){state.date=this.value;go(page)}};[-1,1].forEach(function(dir){document.getElementById(dir<0?'prevDate':'nextDate').onclick=function(){var dt=new Date(state.date+'T12:00:00Z');dt.setUTCDate(dt.getUTCDate()+dir);state.date=dt.toISOString().slice(0,10);go(page)}});document.getElementById('todayDate').onclick=function(){state.date=localToday();go(page)}}
 function attendanceTools(){return '<div class="attendance-tools"><div class="attendance-search">'+icon('search')+'<input id="rosterSearch" type="search" placeholder="Найти ученика" aria-label="Найти ученика" value="'+esc(state.rosterQuery||'')+'"></div><div class="filter-tabs" aria-label="Фильтр отметок">'+[['all','Все'],['none','Без отметки'],['exceptions','Исключения']].map(function(x){return '<button data-filter="'+x[0]+'" class="'+((state.rosterFilter||'all')===x[0]?'on':'')+'" aria-pressed="'+((state.rosterFilter||'all')===x[0])+'">'+x[1]+'</button>'}).join('')+'</div></div>'}
 function drawRoster(map,kind,lesson){
  var query=(state.rosterQuery||'').toLocaleLowerCase('ru'),filter=state.rosterFilter||'all';
@@ -26463,6 +26489,19 @@ pages.journal=async function(c){
  var all=document.getElementById('allPresent');if(all)all.onclick=function(){
   modal('<h3>Все присутствуют?</h3><p class="modal-sub">Отметки за '+fmtDate(state.date)+' будут заменены у всех '+state.students.length+' учеников.</p><button class="btn" id="confirmAll">Отметить всех</button><div class="modal-error" id="allError" role="alert"></div>');
   document.getElementById('confirmAll').onclick=async function(){this.disabled=true;try{await api('/api/attendance/all-present',{method:'POST',body:JSON.stringify({date:state.date})});state.students.forEach(function(s){map[String(s.id)]='present'});closeModal();draw();toast('Все отмечены присутствующими')}catch(e){document.getElementById('allError').textContent=e.message;this.disabled=false}};
+ };
+};
+
+pages.practice=async function(c){
+ await loadStudents();var d=await api('/api/practice-attendance?date='+state.date),map=d.statuses||{};
+ c.innerHTML='<div class="page-heading"><div><h2>Практика</h2><p>Посещаемость группы на практике</p></div></div><div class="section-head">'+dateControls('practiceDate')+'<div class="spacer"></div>'+(can('edit_attendance')?'<button class="btn secondary" id="practiceAllPresent">'+icon('check')+'Все присутствуют</button>':'')+'</div>'+
+ '<div class="card attendance-card">'+attendanceTools()+'<div class="roster-header"><span>Ученик</span><span>Статус на практике</span></div><div id="rosterRows"></div><div class="attendance-meta" id="rosterMeta" aria-live="polite"></div></div>';
+ function draw(){if(c.isConnected)drawRoster(map,'practice')}
+ draw();bindDates('practiceDate','practice');bindRoster(draw);
+ state.onStatusSaved=function(id,st){map[String(id)]=st;draw()};
+ var all=document.getElementById('practiceAllPresent');if(all)all.onclick=function(){
+  modal('<h3>Все присутствуют на практике?</h3><p class="modal-sub">Отметки за '+fmtDate(state.date)+' будут заменены у всех '+state.students.length+' учеников.</p><button class="btn" id="confirmPracticeAll">Отметить всех</button><div class="modal-error" id="practiceAllError" role="alert"></div>');
+  document.getElementById('confirmPracticeAll').onclick=async function(){this.disabled=true;try{await api('/api/practice-attendance/all-present',{method:'POST',body:JSON.stringify({date:state.date})});state.students.forEach(function(student){map[String(student.id)]='present'});closeModal();draw();toast('Практика: все отмечены присутствующими')}catch(e){document.getElementById('practiceAllError').textContent=e.message;this.disabled=false}};
  };
 };
 
@@ -26682,18 +26721,10 @@ pages.pairs=async function(c){
  c.innerHTML='<div class="page-heading"><div><h2>Отметки по парам</h2><p>Выберите занятие и отметьте посещаемость</p></div></div><div class="section-head">'+dateControls('pairDate')+'</div>';
  bindDates('pairDate','pairs');
  if(!lessons){c.innerHTML+='<div class="card empty-state">'+icon('calendar')+'<b>В этот день пар нет</b><p>Выберите другую дату.</p></div>';return}
- c.innerHTML+='<div class="card pair-card"><div class="section-head"><div><b>Пары на '+fmtDate(state.date)+'</b><div class="small muted">По умолчанию 4 · можно изменить на этот день</div></div>'+(can('edit_attendance')?'<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn secondary" id="pairMinus" aria-label="Убрать последнюю пару">- Убрать пару</button><button class="btn secondary" id="pairPlus" aria-label="Добавить пару">+ Добавить пару</button></div>':'')+'</div><div class="pair-switcher">'+Array.from({length:lessons},function(_,i){var n=i+1;return '<button class="btn secondary" data-pair-pick="'+n+'">'+n+' пара</button>'}).join('')+'</div><div class="pair-context" id="pairContext"></div></div><div class="card attendance-card">'+attendanceTools()+'<div class="roster-header"><span>Ученик</span><span>Статус на паре</span></div><div id="rosterRows"></div><div class="attendance-meta" id="rosterMeta" aria-live="polite"></div></div>';
+ c.innerHTML+='<div class="card pair-card"><div class="pair-switcher">'+Array.from({length:lessons},function(_,i){var n=i+1;return '<button class="btn secondary" data-pair-pick="'+n+'">'+n+' пара</button>'}).join('')+'</div><div class="pair-context" id="pairContext"></div></div><div class="card attendance-card">'+attendanceTools()+'<div class="roster-header"><span>Ученик</span><span>Статус на паре</span></div><div id="rosterRows"></div><div class="attendance-meta" id="rosterMeta" aria-live="polite"></div></div>';
  bindDates('pairDate','pairs');
  function draw(){if(!c.isConnected)return;var n=state.pairLesson;document.querySelectorAll('[data-pair-pick]').forEach(function(b){var active=Number(b.dataset.pairPick)===n;b.setAttribute('aria-pressed',String(active));b.classList.toggle('secondary',!active)});document.getElementById('pairContext').innerHTML=icon('pairs')+n+' пара · '+state.students.length+' учеников';drawRoster(d.statuses[String(n)]||{},'pair',n)}
  draw();bindRoster(draw);document.querySelectorAll('[data-pair-pick]').forEach(function(b){b.onclick=function(){state.pairLesson=Number(b.dataset.pairPick);draw()}});
- async function changePairCount(delta){var next=Math.max(1,Math.min(8,lessons+delta));if(next===lessons){toast(delta<0?'Должна остаться хотя бы 1 пара':'Максимум 8 пар');return false}try{await api('/api/pairs/count',{method:'POST',body:JSON.stringify({date:state.date,lessons:next})});state.pairLesson=Math.min(state.pairLesson,next);go('pairs');return true}catch(e){toast(e.message);return false}}
- function askRemovePair(){
-  if(lessons<=1){toast('Должна остаться хотя бы 1 пара');return}
-  var removedLesson=lessons,marks=d.statuses[String(removedLesson)]||{},marked=Object.keys(marks).filter(function(id){return marks[id]&&marks[id]!=='none'}).length;
-  modal('<h3>Убрать '+removedLesson+'-ю пару?</h3><p class="modal-sub">'+fmtDate(state.date)+'</p><p class="muted">После подтверждения количество пар на этот день станет <b>'+(lessons-1)+'</b>.'+(marked?' Отметки на '+removedLesson+'-й паре будут удалены: <b>'+marked+'</b>.':' На '+removedLesson+'-й паре отметок пока нет.')+'</p><button class="btn danger" id="confirmPairMinus" style="width:100%">- Убрать '+removedLesson+'-ю пару</button>');
-  var yes=document.getElementById('confirmPairMinus');if(yes)yes.onclick=async function(){yes.disabled=true;var ok=await changePairCount(-1);if(ok)closeModal();else yes.disabled=false};
- }
- var minus=document.getElementById('pairMinus'),plus=document.getElementById('pairPlus');if(minus)minus.onclick=askRemovePair;if(plus)plus.onclick=function(){changePairCount(1)};
  state.onStatusSaved=function(id,st,lesson){(d.statuses[String(lesson)]||(d.statuses[String(lesson)]={}))[String(id)]=st;draw()};
 };
 
@@ -26713,7 +26744,7 @@ async function performSave(button,action,success){var text=button.innerHTML;butt
 pages.calendar=async function(c){
  var d=await api('/api/calendar?month='+state.month),map=d.days||{},first=new Date(state.month+'-01T12:00:00'),offset=(first.getDay()+6)%7,last=new Date(first.getFullYear(),first.getMonth()+1,0).getDate(),cells='';
  for(var i=0;i<offset;i++)cells+='<div aria-hidden="true"></div>';
- for(var day=1;day<=last;day++){var date=state.month+'-'+String(day).padStart(2,'0'),q=map[date]||{},total=Number(q.absent||0)+Number(q.sick||0)+Number(q.application||0)+Number(q.partial||0);var wd=new Date(date+'T12:00:00Z').getUTCDay(),off=wd===0||wd===6;cells+='<button '+(off?'disabled ':'')+'class="calendar-date '+(date===localToday()?'is-today ':'')+(off?'is-weekend':'')+'" '+(off?'':'data-journal-date="'+date+'"')+' aria-label="'+fmtDate(date)+(off?'. Выходной':'. '+total+' исключений. Открыть журнал')+'"><span>'+day+'</span><div class="calendar-marks">'+(off?'':[['absent','Пропуски'],['sick','Болезни'],['application','Заявления'],['partial','Частично']].filter(function(k){return Number(q[k[0]])>0}).map(function(k){return '<small class="calendar-count '+k[0]+'" title="'+k[1]+'"><i></i>'+q[k[0]]+'</small>'}).join(''))+'</div></button>'}
+ for(var day=1;day<=last;day++){var date=state.month+'-'+String(day).padStart(2,'0'),q=map[date]||{},total=Number(q.absent||0)+Number(q.sick||0)+Number(q.application||0)+Number(q.partial||0);cells+='<button class="calendar-date '+(date===localToday()?'is-today':'')+'" data-journal-date="'+date+'" aria-label="'+fmtDate(date)+'. '+total+' исключений. Открыть журнал"><span>'+day+'</span><div class="calendar-marks">'+[['absent','Пропуски'],['sick','Болезни'],['application','Заявления'],['partial','Частично']].filter(function(k){return Number(q[k[0]])>0}).map(function(k){return '<small class="calendar-count '+k[0]+'" title="'+k[1]+'"><i></i>'+q[k[0]]+'</small>'}).join('')+'</div></button>'}
  c.innerHTML=pageHeading('Календарь','Выберите день, чтобы перейти к отметкам',monthControl('calMonth'))+'<div class="card calendar-card"><div class="calendar-weekdays">'+['Пн','Вт','Ср','Чт','Пт','Сб','Вс'].map(function(x){return '<span>'+x+'</span>'}).join('')+'</div><div class="calendar month-calendar">'+cells+'</div><div class="calendar-legend">'+[['absent','Отсутствуют'],['sick','Болеют'],['application','Заявления'],['partial','Частично']].map(function(x){return '<span class="calendar-count '+x[0]+'"><i></i>'+x[1]+'</span>'}).join('')+'</div></div>';
  bindMonth('calMonth','calendar');c.querySelectorAll('[data-journal-date]').forEach(function(b){b.onclick=function(){state.date=b.dataset.journalDate;go('journal')}});
 };
@@ -26797,7 +26828,7 @@ pages.chat=async function(c){
  notify.onclick=function(){if(journalPush.enabled)disableChatPush();else enableChatPush(true)};
  function cleanup(){if(disposed)return;disposed=true;if(journalPush.onChange===notifState)journalPush.onChange=null;clearInterval(timer);sizeObserver.disconnect();window.removeEventListener('resize',fitChat);if(window.visualViewport)window.visualViewport.removeEventListener('resize',fitChat);obs.disconnect();if(!document.querySelector('#content .chat-shell')){document.body.classList.remove('chat-open','chat-typing');document.body.style.removeProperty('--chat-viewport');document.body.style.removeProperty('--chat-nav-height')}}
  var obs=new MutationObserver(function(){if(!c.isConnected)cleanup()});obs.observe(document.body,{childList:true,subtree:true});
- await load();if(active())timer=setInterval(load,3000);else cleanup();
+ await load();if(active())timer=setInterval(load,5000);else cleanup();
 };
 pages.online=async function(c){
  var loading=false;
@@ -26944,7 +26975,6 @@ pages.audit=async function(c){
     attendance_set:['👥','Изменена посещаемость','Посещаемость'],
     attendance_all_present:['✅','Все отмечены присутствующими','Посещаемость'],
     pair_attendance_set:['📚','Изменена отметка на паре','Пары'],
-    pair_count_set:['➕','Изменено число пар','Пары'],
     student_add:['➕','Добавлен студент','Студенты'],
     student_update:['✏️','Изменены данные студента','Студенты'],
     student_delete:['🗑️','Удалён студент','Студенты'],
@@ -27073,7 +27103,7 @@ document.getElementById('passPane').onsubmit=async function(e){e.preventDefault(
 async function searchJournal(q){try{var d=await api('/api/search?q='+encodeURIComponent(q));modal('<h3>Результаты поиска</h3><p class="modal-sub">'+esc(q)+'</p><div class="list">'+((d.results||[]).map(function(x){return '<div class="list-item"><div><b>'+esc(x.title)+'</b><div class="muted small">'+esc(x.subtitle||'')+'</div></div></div>'}).join('')||'<div class="empty-state">Ничего не найдено</div>')+'</div>')}catch(e){toast(e.message)}}
 document.getElementById('globalSearch').onkeydown=function(e){if(e.key==='Enter'&&this.value.trim())searchJournal(this.value.trim())};
 document.getElementById('openSearch').onclick=function(){modal('<h3>Поиск по журналу</h3><form id="mobileSearchForm"><div class="field"><label for="mobileSearchInput">Имя или событие</label><input type="search" id="mobileSearchInput" placeholder="Что найти?" required></div><button class="btn" type="submit">Найти</button></form>');document.getElementById('mobileSearchForm').onsubmit=function(e){e.preventDefault();var q=document.getElementById('mobileSearchInput').value.trim();if(q)searchJournal(q)}};
-state.date=webWorkday(localToday(),-1);state.month=state.date.slice(0,7);
+state.date=localToday();state.month=state.date.slice(0,7);
 var presenceBusy=false,presenceRequest=null;
 async function presencePulse(){
  if(document.hidden||!state.me||presenceBusy)return;
@@ -27081,7 +27111,7 @@ async function presencePulse(){
  try{await api('/api/me',{cache:'no-store',signal:presenceRequest.signal})}catch(e){}finally{clearTimeout(timeout);presenceBusy=false;presenceRequest=null}
  if(!document.hidden&&state.me&&state.page==='online'&&state.refreshPresence)await state.refreshPresence();
 }
-setInterval(presencePulse,30000);
+setInterval(presencePulse,60000);
 document.addEventListener('visibilitychange',function(){if(document.hidden){if(presenceRequest)presenceRequest.abort()}else presencePulse()});
 
 async function boot(){
@@ -27150,10 +27180,6 @@ async function initWebDb(env) {
         teacher TEXT,
         room TEXT,
         PRIMARY KEY(weekday, lesson_no)
-    )`).run();
-  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS day_lesson_counts (
-        date TEXT PRIMARY KEY,
-        lessons INTEGER NOT NULL
     )`).run();
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS student_notes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -27668,8 +27694,6 @@ async function smartMonthData(env, month) {
         SELECT date,student_id,lesson_no,status FROM lesson_attendance
         WHERE substr(date,1,7)=?
     `).bind(month).all()).results || [];
-  const lessonCountRows = (await env.DB.prepare(`SELECT date,lessons FROM day_lesson_counts WHERE substr(date,1,7)=?`).bind(month).all()).results || [];
-  const lessonCountMap = new Map(lessonCountRows.map((r) => [r.date, Number(r.lessons)]));
   const dates = /* @__PURE__ */ new Set([...dailyRows.map((r) => r.date), ...pairRows.map((r) => r.date)]);
   const dailyMap = new Map(dailyRows.map((r) => [`${r.date}:${r.student_id}`, r.status]));
   const pairMap = /* @__PURE__ */ new Map();
@@ -27693,7 +27717,7 @@ async function smartMonthData(env, month) {
     days: []
   }]));
   for (const date of [...dates].sort()) {
-    const lessons = normalizedLessonCount(date, lessonCountMap.get(date));
+    const lessons = lessonsCountForDate(date);
     for (const st of students) {
       const sid = Number(st.id);
       const key = `${date}:${sid}`;
@@ -27732,9 +27756,8 @@ async function dashboardApi(env) {
     pairMap.get(sid).push(r);
   }
   const summaries = [];
-  const todayLessons = await lessonsCountForDate(env, date);
   for (const st of students) {
-    const summary = smartDayStatus(dailyMap.get(Number(st.id)) || "none", pairMap.get(Number(st.id)) || [], todayLessons);
+    const summary = smartDayStatus(dailyMap.get(Number(st.id)) || "none", pairMap.get(Number(st.id)) || [], lessonsCountForDate(date));
     summaries.push({ id: st.id, name: st.name, ...summary });
   }
   const today = summaries.filter((x) => !["present", "none"].includes(x.kind)).map((x) => ({
@@ -27835,13 +27858,11 @@ async function handleWebApi(request, env, url, ctx) {
         if (!pairMap.has(r.date)) pairMap.set(r.date, []);
         pairMap.get(r.date).push(r);
       }
-      const lessonCountRows = (await env.DB.prepare(`SELECT date,lessons FROM day_lesson_counts`).all()).results || [];
-      const lessonCountMap = new Map(lessonCountRows.map((r) => [r.date, Number(r.lessons)]));
       const events = [];
       let absent = 0, sick2 = 0, application2 = 0, presentDays = 0, countedDays = 0, partial = 0;
       for (const date of dates) {
         const pairs = pairMap.get(date) || [];
-        const summary = smartDayStatus(dailyMap.get(date) || "none", pairs, normalizedLessonCount(date, lessonCountMap.get(date)));
+        const summary = smartDayStatus(dailyMap.get(date) || "none", pairs, lessonsCountForDate(date));
         if (summary.kind === "none") continue;
         countedDays++;
         if (summary.present_any) presentDays++;
@@ -27892,8 +27913,32 @@ async function handleWebApi(request, env, url, ctx) {
       await webAudit(env, user, "attendance_all_present", date);
       return jsonResponse({ ok: true });
     }
+    if (path === "/api/practice-attendance" && request.method === "GET") {
+      const date = qdate(url.searchParams.get("date"));
+      const rows = (await env.DB.prepare(`SELECT student_id,status FROM practice_attendance WHERE date=?`).bind(date).all()).results || [];
+      return jsonResponse({ date, statuses: Object.fromEntries(rows.map((r) => [String(r.student_id), r.status])) });
+    }
+    if (path === "/api/practice-attendance" && request.method === "POST") {
+      if (!canWeb(user, "edit_attendance")) return jsonResponse({ error: "Нет права" }, 403);
+      const date = qdate(body.date), sid = Number(body.student_id), st = String(body.status || "none");
+      if (!sid) return jsonResponse({ error: "Не выбран ученик" }, 400);
+      if (!["none","present","absent","late","sick","application","left"].includes(st)) return jsonResponse({ error: "Неизвестный статус" }, 400);
+      if (st === "none") await env.DB.prepare(`DELETE FROM practice_attendance WHERE date=? AND student_id=?`).bind(date, sid).run();
+      else await env.DB.prepare(`INSERT INTO practice_attendance(date,student_id,status) VALUES(?,?,?) ON CONFLICT(date,student_id) DO UPDATE SET status=excluded.status`).bind(date, sid, st).run();
+      await webAudit(env, user, "practice_attendance_set", `${date} student=${sid} status=${st}`);
+      return jsonResponse({ ok: true });
+    }
+    if (path === "/api/practice-attendance/all-present" && request.method === "POST") {
+      if (!canWeb(user, "edit_attendance")) return jsonResponse({ error: "Нет права" }, 403);
+      const date = qdate(body.date);
+      for (const student of await orderedStudents(env, true)) {
+        await env.DB.prepare(`INSERT INTO practice_attendance(date,student_id,status) VALUES(?,?,'present') ON CONFLICT(date,student_id) DO UPDATE SET status='present'`).bind(date, student.id).run();
+      }
+      await webAudit(env, user, "practice_attendance_all_present", date);
+      return jsonResponse({ ok: true });
+    }
     if (path === "/api/pairs" && request.method === "GET") {
-      const date = qdate(url.searchParams.get("date")), lessons = await lessonsCountForDate(env, date);
+      const date = qdate(url.searchParams.get("date")), lessons = lessonsCountForDate(date);
       const rows = (await env.DB.prepare(`SELECT lesson_no,student_id,status FROM lesson_attendance WHERE date=?`).bind(date).all()).results || [];
       const statuses = {};
       for (const r of rows) {
@@ -27901,23 +27946,9 @@ async function handleWebApi(request, env, url, ctx) {
       }
       return jsonResponse({ date, lessons, statuses });
     }
-    if (path === "/api/pairs/count" && request.method === "POST") {
-      if (!canWeb(user, "edit_attendance")) return jsonResponse({ error: "Нет права" }, 403);
-      const date = qdate(body.date), day = dateWeekday(date);
-      if (day === 0 || day === 6) return jsonResponse({ error: "Суббота и воскресенье не являются учебными днями" }, 400);
-      const lessons = Math.max(1, Math.min(8, Number(body.lessons) || 4));
-      await env.DB.prepare(`INSERT INTO day_lesson_counts(date,lessons) VALUES(?,?)
-        ON CONFLICT(date) DO UPDATE SET lessons=excluded.lessons`).bind(date, lessons).run();
-      await env.DB.prepare(`DELETE FROM lesson_attendance WHERE date=? AND lesson_no>?`).bind(date, lessons).run();
-      await webAudit(env, user, "pair_count_set", `${date}: ${lessons}`);
-      return jsonResponse({ ok: true, date, lessons });
-    }
     if (path === "/api/pairs" && request.method === "POST") {
       if (!canWeb(user, "edit_attendance")) return jsonResponse({ error: "\u041D\u0435\u0442 \u043F\u0440\u0430\u0432\u0430" }, 403);
       const date = qdate(body.date), lesson = Number(body.lesson_no), sid = Number(body.student_id), st = String(body.status || "none");
-      const lessonLimit = await lessonsCountForDate(env, date);
-      if (lessonLimit <= 0) return jsonResponse({ error: "На выходных пары не отмечаются" }, 400);
-      if (lesson < 1 || lesson > lessonLimit) return jsonResponse({ error: "Такой пары нет в выбранный день" }, 400);
       if (st === "none") await env.DB.prepare(`DELETE FROM lesson_attendance WHERE date=? AND lesson_no=? AND student_id=?`).bind(date, lesson, sid).run();
       else await env.DB.prepare(`INSERT INTO lesson_attendance(date,lesson_no,student_id,status) VALUES(?,?,?,?) ON CONFLICT(date,lesson_no,student_id) DO UPDATE SET status=excluded.status`).bind(date, lesson, sid, st).run();
       await webAudit(env, user, "pair_attendance_set", `${date} pair=${lesson} student=${sid} status=${st}`);
@@ -27951,14 +27982,12 @@ async function handleWebApi(request, env, url, ctx) {
     }
     if (path === "/api/duty" && request.method === "GET") {
       const date = qdate(url.searchParams.get("date"));
-      if ([0,6].includes(dateWeekday(date))) return jsonResponse({ date, students: [], workday: false });
       const students = (await env.DB.prepare(`SELECT s.id,s.name FROM duty d JOIN students s ON s.id=d.student_id WHERE d.date=? ORDER BY s.name`).bind(date).all()).results || [];
-      return jsonResponse({ date, students, workday: true });
+      return jsonResponse({ date, students });
     }
     if (path === "/api/duty" && request.method === "POST") {
       if (!canWeb(user, "edit_duty")) return jsonResponse({ error: "\u041D\u0435\u0442 \u043F\u0440\u0430\u0432\u0430" }, 403);
       const date = qdate(body.date), ids = Array.isArray(body.student_ids) ? body.student_ids.map(Number) : [];
-      if ([0,6].includes(dateWeekday(date))) return jsonResponse({ error: "На субботу и воскресенье дежурные не назначаются" }, 400);
       await env.DB.prepare(`DELETE FROM duty WHERE date=?`).bind(date).run();
       for (const id of ids) await env.DB.prepare(`INSERT OR IGNORE INTO duty(date,student_id) VALUES(?,?)`).bind(date, id).run();
       await webAudit(env, user, "duty_set", `${date}: ${ids.join(",")}`);
@@ -27975,14 +28004,6 @@ async function handleWebApi(request, env, url, ctx) {
       await env.DB.prepare(`INSERT INTO schedule_lessons(weekday,lesson_no,subject,time,teacher,room) VALUES(?,?,?,?,?,?)
                 ON CONFLICT(weekday,lesson_no) DO UPDATE SET subject=excluded.subject,time=excluded.time,teacher=excluded.teacher,room=excluded.room`).bind(Number(body.weekday), Number(body.lesson_no), String(body.subject || ""), String(body.time || ""), String(body.teacher || ""), String(body.room || "")).run();
       await webAudit(env, user, "schedule_set", `day=${body.weekday} lesson=${body.lesson_no}`);
-      return jsonResponse({ ok: true });
-    }
-    if (path === "/api/schedule/delete" && request.method === "POST") {
-      if (!canWeb(user, "edit_schedule")) return jsonResponse({ error: "Нет права" }, 403);
-      const weekday = Number(body.weekday), lesson = Number(body.lesson_no);
-      if (weekday < 1 || weekday > 5 || lesson < 1 || lesson > 8) return jsonResponse({ error: "Неверный день или номер пары" }, 400);
-      await env.DB.prepare(`DELETE FROM schedule_lessons WHERE weekday=? AND lesson_no=?`).bind(weekday, lesson).run();
-      await webAudit(env, user, "schedule_set", `delete day=${weekday} lesson=${lesson}`);
       return jsonResponse({ ok: true });
     }
     if (path === "/api/class-hour" && request.method === "GET") {
@@ -28451,13 +28472,7 @@ async function handleWebApi(request, env, url, ctx) {
     }
 
     if (path === "/api/chat" && request.method === "GET") {
-      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS web_chat_messages(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        account_id INTEGER NOT NULL,
-        author TEXT NOT NULL,
-        message TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      )`).run();
+      await ensureChatDb(env);
       const after=Math.max(0,Number(url.searchParams.get("after")||0)||0);
       const rows=(await env.DB.prepare(`SELECT id,account_id,author,message,created_at FROM web_chat_messages
         WHERE id>? ORDER BY id DESC LIMIT 120`).bind(after).all()).results||[];
@@ -28466,13 +28481,7 @@ async function handleWebApi(request, env, url, ctx) {
         time_text:new Date(r.created_at).toLocaleString("ru-RU",{timeZone:"Europe/Chisinau",day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"})}))});
     }
     if (path === "/api/chat" && request.method === "POST") {
-      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS web_chat_messages(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        account_id INTEGER NOT NULL,
-        author TEXT NOT NULL,
-        message TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      )`).run();
+      await ensureChatDb(env);
       const message=String(body.message||"").trim().slice(0,1500);
       if(!message)return jsonResponse({error:"Пустое сообщение"},400);
       const author=String(user.display_name||user.login||"Пользователь").slice(0,100),now=new Date().toISOString();
@@ -28617,7 +28626,7 @@ async function handleWebApi(request, env, url, ctx) {
     }
     if (path === "/api/backup") {
       if (!canWeb(user, "reports")) return jsonResponse({ error: "\u041D\u0435\u0442 \u043F\u0440\u0430\u0432\u0430" }, 403);
-      const tables = ["students", "attendance", "lesson_attendance", "duty", "schedule_lessons", "day_lesson_counts"];
+      const tables = ["students", "attendance", "lesson_attendance", "duty", "schedule_lessons"];
       const data = { created_at: (/* @__PURE__ */ new Date()).toISOString(), tables: {} };
       for (const t of tables) data.tables[t] = (await env.DB.prepare(`SELECT * FROM ${t}`).all()).results || [];
       return new Response(JSON.stringify(data, null, 2), { headers: { "content-type": "application/json; charset=UTF-8", "content-disposition": "attachment; filename=journal102_backup.json" } });
