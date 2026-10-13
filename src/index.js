@@ -26337,6 +26337,36 @@ function startChatWatch(){if(state.chatWatch)clearInterval(state.chatWatch);chat
 function localToday(){var parts=new Intl.DateTimeFormat('en-GB',{timeZone:'Europe/Chisinau',year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date());var p={};parts.forEach(function(x){p[x.type]=x.value});return p.year+'-'+p.month+'-'+p.day}
 function dateControls(id){return '<div class="date-controls"><button class="btn ghost icon-btn" id="prevDate" aria-label="Предыдущий день">'+icon('left')+'</button><input type="date" id="'+id+'" aria-label="Дата журнала" value="'+state.date+'"><button class="btn ghost icon-btn" id="nextDate" aria-label="Следующий день">'+icon('right')+'</button><button class="btn secondary today-btn" id="todayDate">Сегодня</button></div>'}
 function bindDates(id,page){document.getElementById(id).onchange=function(){if(this.value){state.date=this.value;go(page)}};[-1,1].forEach(function(dir){document.getElementById(dir<0?'prevDate':'nextDate').onclick=function(){var dt=new Date(state.date+'T12:00:00Z');dt.setUTCDate(dt.getUTCDate()+dir);state.date=dt.toISOString().slice(0,10);go(page)}});document.getElementById('todayDate').onclick=function(){state.date=localToday();go(page)}}
+function nearestPracticeTuesday(date){
+ var dt=new Date((date||localToday())+'T12:00:00Z');
+ var day=dt.getUTCDay();
+ var diff=day===2?0:-((day+5)%7||7);
+ dt.setUTCDate(dt.getUTCDate()+diff);
+ return dt.toISOString().slice(0,10);
+}
+function bindPracticeDates(id){
+ var input=document.getElementById(id);
+ input.onchange=function(){
+  if(!this.value)return;
+  if(new Date(this.value+'T12:00:00Z').getUTCDay()!==2){
+   toast('ПО проводится только по вторникам');
+   this.value=state.date;
+   return;
+  }
+  state.date=this.value;go('practice');
+ };
+ document.getElementById('prevDate').onclick=function(){
+  var dt=new Date(state.date+'T12:00:00Z');dt.setUTCDate(dt.getUTCDate()-7);
+  state.date=dt.toISOString().slice(0,10);go('practice');
+ };
+ document.getElementById('nextDate').onclick=function(){
+  var dt=new Date(state.date+'T12:00:00Z');dt.setUTCDate(dt.getUTCDate()+7);
+  state.date=dt.toISOString().slice(0,10);go('practice');
+ };
+ document.getElementById('todayDate').onclick=function(){
+  state.date=nearestPracticeTuesday(localToday());go('practice');
+ };
+}
 function attendanceTools(){return '<div class="attendance-tools"><div class="attendance-search">'+icon('search')+'<input id="rosterSearch" type="search" placeholder="Найти ученика" aria-label="Найти ученика" value="'+esc(state.rosterQuery||'')+'"></div><div class="filter-tabs" aria-label="Фильтр отметок">'+[['all','Все'],['none','Без отметки'],['exceptions','Исключения']].map(function(x){return '<button data-filter="'+x[0]+'" class="'+((state.rosterFilter||'all')===x[0]?'on':'')+'" aria-pressed="'+((state.rosterFilter||'all')===x[0])+'">'+x[1]+'</button>'}).join('')+'</div></div>'}
 function drawRoster(map,kind,lesson){
  var query=(state.rosterQuery||'').toLocaleLowerCase('ru'),filter=state.rosterFilter||'all';
@@ -26505,11 +26535,12 @@ pages.journal=async function(c){
 };
 
 pages.practice=async function(c){
+ if(new Date(state.date+'T12:00:00Z').getUTCDay()!==2)state.date=nearestPracticeTuesday(state.date);
  await loadStudents();var d=await api('/api/practice-attendance?date='+state.date),map=d.statuses||{};
- c.innerHTML='<div class="page-heading"><div><h2>Практика</h2><p>Посещаемость группы на практике</p></div></div><div class="section-head">'+dateControls('practiceDate')+'<div class="spacer"></div>'+(can('edit_attendance')?'<button class="btn secondary" id="practiceAllPresent">'+icon('check')+'Все присутствуют</button>':'')+'</div>'+
+ c.innerHTML='<div class="page-heading"><div><h2>Практика</h2><p>ПО проводится только по вторникам</p></div></div><div class="section-head">'+dateControls('practiceDate')+'<div class="spacer"></div>'+(can('edit_attendance')?'<button class="btn secondary" id="practiceAllPresent">'+icon('check')+'Все присутствуют</button>':'')+'</div>'+
  '<div class="card attendance-card">'+attendanceTools()+'<div class="roster-header"><span>Ученик</span><span>Статус на практике</span></div><div id="rosterRows"></div><div class="attendance-meta" id="rosterMeta" aria-live="polite"></div></div>';
  function draw(){if(c.isConnected)drawRoster(map,'practice')}
- draw();bindDates('practiceDate','practice');bindRoster(draw);
+ draw();bindPracticeDates('practiceDate');bindRoster(draw);
  state.onStatusSaved=function(id,st){map[String(id)]=st;draw()};
  var all=document.getElementById('practiceAllPresent');if(all)all.onclick=function(){
   modal('<h3>Все присутствуют на практике?</h3><p class="modal-sub">Отметки за '+fmtDate(state.date)+' будут заменены у всех '+state.students.length+' учеников.</p><button class="btn" id="confirmPracticeAll">Отметить всех</button><div class="modal-error" id="practiceAllError" role="alert"></div>');
@@ -27928,6 +27959,7 @@ async function handleWebApi(request, env, url, ctx) {
     if (path === "/api/practice-attendance" && request.method === "GET") {
       await ensurePracticeAttendanceTable(env);
       const date = qdate(url.searchParams.get("date"));
+      if (dateWeekday(date) !== 2) return jsonResponse({ error: "ПО проводится только по вторникам" }, 400);
       const rows = (await env.DB.prepare(`SELECT student_id,status FROM practice_attendance WHERE date=?`).bind(date).all()).results || [];
       return jsonResponse({ date, statuses: Object.fromEntries(rows.map((r) => [String(r.student_id), r.status])) });
     }
@@ -27935,6 +27967,7 @@ async function handleWebApi(request, env, url, ctx) {
       await ensurePracticeAttendanceTable(env);
       if (!canWeb(user, "edit_attendance")) return jsonResponse({ error: "Нет права" }, 403);
       const date = qdate(body.date), sid = Number(body.student_id), st = String(body.status || "none");
+      if (dateWeekday(date) !== 2) return jsonResponse({ error: "ПО проводится только по вторникам" }, 400);
       if (!sid) return jsonResponse({ error: "Не выбран ученик" }, 400);
       if (!["none","present","absent","late","sick","application","left"].includes(st)) return jsonResponse({ error: "Неизвестный статус" }, 400);
       if (st === "none") await env.DB.prepare(`DELETE FROM practice_attendance WHERE date=? AND student_id=?`).bind(date, sid).run();
@@ -27946,6 +27979,7 @@ async function handleWebApi(request, env, url, ctx) {
       await ensurePracticeAttendanceTable(env);
       if (!canWeb(user, "edit_attendance")) return jsonResponse({ error: "Нет права" }, 403);
       const date = qdate(body.date);
+      if (dateWeekday(date) !== 2) return jsonResponse({ error: "ПО проводится только по вторникам" }, 400);
       for (const student of await orderedStudents(env, true)) {
         await env.DB.prepare(`INSERT INTO practice_attendance(date,student_id,status) VALUES(?,?,'present') ON CONFLICT(date,student_id) DO UPDATE SET status='present'`).bind(date, student.id).run();
       }
