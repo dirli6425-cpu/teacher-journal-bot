@@ -21287,7 +21287,14 @@ function textResponse(text, status = 200) {
 }
 __name(textResponse, "textResponse");
 async function ensurePracticeAttendanceTable(env) {
-  await ensurePracticeAttendanceTable(env);
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS practice_attendance (
+      date TEXT NOT NULL,
+      student_id INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      PRIMARY KEY(date, student_id)
+    )
+  `).run();
 }
 __name(ensurePracticeAttendanceTable, "ensurePracticeAttendanceTable");
 
