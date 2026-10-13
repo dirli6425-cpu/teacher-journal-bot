@@ -21286,6 +21286,11 @@ function textResponse(text, status = 200) {
   });
 }
 __name(textResponse, "textResponse");
+async function ensurePracticeAttendanceTable(env) {
+  await ensurePracticeAttendanceTable(env);
+}
+__name(ensurePracticeAttendanceTable, "ensurePracticeAttendanceTable");
+
 async function initDb(env) {
   await env.DB.prepare(`
     CREATE TABLE IF NOT EXISTS students (
@@ -27914,11 +27919,13 @@ async function handleWebApi(request, env, url, ctx) {
       return jsonResponse({ ok: true });
     }
     if (path === "/api/practice-attendance" && request.method === "GET") {
+      await ensurePracticeAttendanceTable(env);
       const date = qdate(url.searchParams.get("date"));
       const rows = (await env.DB.prepare(`SELECT student_id,status FROM practice_attendance WHERE date=?`).bind(date).all()).results || [];
       return jsonResponse({ date, statuses: Object.fromEntries(rows.map((r) => [String(r.student_id), r.status])) });
     }
     if (path === "/api/practice-attendance" && request.method === "POST") {
+      await ensurePracticeAttendanceTable(env);
       if (!canWeb(user, "edit_attendance")) return jsonResponse({ error: "Нет права" }, 403);
       const date = qdate(body.date), sid = Number(body.student_id), st = String(body.status || "none");
       if (!sid) return jsonResponse({ error: "Не выбран ученик" }, 400);
@@ -27929,6 +27936,7 @@ async function handleWebApi(request, env, url, ctx) {
       return jsonResponse({ ok: true });
     }
     if (path === "/api/practice-attendance/all-present" && request.method === "POST") {
+      await ensurePracticeAttendanceTable(env);
       if (!canWeb(user, "edit_attendance")) return jsonResponse({ error: "Нет права" }, 403);
       const date = qdate(body.date);
       for (const student of await orderedStudents(env, true)) {
